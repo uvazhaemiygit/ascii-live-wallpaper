@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ASCII Live Wallpaper</string>
+    <string name="settings_title">ASCII-обои</string>
+    <string name="settings_subtitle">Пять 3D-сцен и ваше фото: ASCII-символы или точечная матрица Nothing. Свои цвета знаков и фона, живая графика без сети.</string>
+
+    <string name="preview_title">ПРЕДПРОСМОТР / В РЕАЛЬНОМ ВРЕМЕНИ</string>
+    <string name="preview_live">LIVE</string>
+    <string name="preview_stats">%1$d COLS · %2$d FPS</string>
+    <string name="preview_content_description">Живой предпросмотр символьного рендера</string>
+
+    <string name="section_shape">01 / ФОРМА</string>
+    <string name="style_title">Стиль фигур</string>
+    <string name="style_fusilli">Макароны</string>
+    <string name="style_fusilli_detail">Fusilli · две спиральные макаронины</string>
+    <string name="style_cubes">Кубы</string>
+    <string name="style_cubes_detail">Два куба · чистый 3D-каркас</string>
+    <string name="style_big_cube">Большой куб</string>
+    <string name="style_big_cube_detail">Один куб · фиксированная дистанция</string>
+    <string name="style_dna">ДНК</string>
+    <string name="style_dna_detail">Двойная спираль · бесконечная диагональ</string>
+    <string name="style_black_hole">Чёрная дыра</string>
+    <string name="style_black_hole_detail">Аккреционный диск · фотонное кольцо</string>
+    <string name="style_photo">Моё фото</string>
+    <string name="style_photo_detail">Ваша картинка · цвет → ч/б → знаки</string>
+
+    <string name="section_photo">02 / ФОТО</string>
+    <string name="photo_title">Картинка для рендера</string>
+    <string name="photo_ready">Фото загружено и применено.</string>
+    <string name="photo_missing">Фото ещё не выбрано.</string>
+    <string name="photo_processing">Обрабатываю картинку…</string>
+    <string name="photo_processing_button">Обработка…</string>
+    <string name="photo_error">Не удалось обработать это изображение. Попробуйте другое.</string>
+    <string name="photo_pick">Выбрать фото</string>
+    <string name="photo_replace">Заменить фото</string>
+    <string name="photo_hint">Откроется системный выбор изображения. Картинка станет чёрно-белой и будет собрана из символов или точек — стиль и цвета выбираются ниже.</string>
+    <string name="photo_preview_missing">ВЫБЕРИТЕ ФОТО</string>
+    <string name="photo_preview_busy">ОБРАБОТКА…</string>
+
+    <string name="photo_fit_sheet_label">РАЗМЕР ФОТО</string>
+    <string name="photo_fit_sheet_title">Как показать фото?</string>
+    <string name="photo_fit_sheet_hint">Выберите, как вписать картинку в экран. Позже это можно изменить в разделе «Фото».</string>
+    <string name="photo_fit_contain_title">Оставить текущий размер</string>
+    <string name="photo_fit_contain_detail">Фото целиком, без обрезки. По краям могут остаться поля.</string>
+    <string name="photo_fit_cover_title">Растянуть на весь экран</string>
+    <string name="photo_fit_cover_detail">Заполнит экран без искажения; лишние края обрежутся.</string>
+    <string name="photo_fit_row_title">Размер фото</string>
+    <string name="photo_fit_row_contain">Текущий размер</string>
+    <string name="photo_fit_row_cover">На весь экран</string>
+    <string name="photo_fit_current">Сейчас: %1$s</string>
+    <string name="photo_fit_change">Изменить</string>
+    <string name="photo_fit_close">Закрыть</string>
+
+    <string name="section_resolution">02 / РАЗРЕШЕНИЕ</string>
+    <string name="section_resolution_photo">03 / РАЗРЕШЕНИЕ</string>
+    <string name="resolution_title">Плотность знаков</string>
+    <string name="resolution_value">%1$d знаков по ширине</string>
+    <string name="resolution_hint">Больше знаков — больше деталей и больше нагрузки на устройство.</string>
+    <string name="photo_resolution_title">Плотность знаков</string>
+    <string name="photo_resolution_hint">Сколько знаков помещается по ширине. Больше знаков — больше деталей и нагрузки.</string>
+
+    <string name="section_motion">03 / ДВИЖЕНИЕ</string>
+    <string name="speed_title">Скорость вращения</string>
+    <string name="speed_value">%1$d°/с</string>
+    <string name="speed_slow">медленно</string>
+    <string name="speed_fast">быстрее</string>
+
+    <string name="fps_title">Частота кадров</string>
+    <string name="fps_value">%1$d FPS</string>
+    <string name="fps_hint">Ограничение плавности и расхода батареи. 60 FPS — универсальный баланс.</string>
+
+    <string name="section_lines">04 / ЛИНИИ</string>
+    <string name="line_width_title">Толщина линий</string>
+    <string name="line_width_value">%1$s×</string>
+    <string name="line_width_thin">тонко</string>
+    <string name="line_width_thick">толсто</string>
+    <string name="line_width_hint">Масштаб штрихов кубов, ДНК и чёрной дыры. Сплошные макароны не меняются.</string>
+
+    <string name="section_symbols_color">05 / СИМВОЛЫ И ЦВЕТ</string>
+    <string name="section_symbols_color_photo">04 / СИМВОЛЫ И ЦВЕТ</string>
+    <string name="symbol_style_title">Стиль знаков</string>
+    <string name="symbol_style_hint">ASCII рисует символами, Nothing — точками разного размера. Цвета применяются ко всем сценам и фото.</string>
+    <string name="symbol_ascii">ASCII</string>
+    <string name="symbol_ascii_detail">символы</string>
+    <string name="symbol_nothing">NOTHING</string>
+    <string name="symbol_nothing_detail">точки</string>
+    <string name="glyph_color_title">Цвет символов</string>
+    <string name="background_color_title">Цвет фона</string>
+    <string name="color_custom_hint">Откройте палитру, чтобы выбрать любой оттенок, насыщенность и яркость. По умолчанию: белые символы на чёрном фоне.</string>
+    <string name="color_palette">Палитра</string>
+    <string name="color_picker_hint">Настройте оттенок, насыщенность и яркость.</string>
+    <string name="color_preview">ПРЕДПРОСМОТР ЦВЕТА</string>
+    <string name="color_hue">Оттенок</string>
+    <string name="color_saturation">Насыщенность</string>
+    <string name="color_brightness">Яркость</string>
+    <string name="color_degrees_value">%1$d°</string>
+    <string name="color_percent_value">%1$d%%</string>
+    <string name="color_quick_presets">БЫСТРЫЙ ВЫБОР</string>
+    <string name="color_cancel">Отмена</string>
+    <string name="color_apply">Готово</string>
+
+    <string name="unlock_title">Своя анимация на разблокировку</string>
+    <string name="unlock_detail">Макароны и кубы меняются местами, большой куб и ДНК на полсекунды раскручиваются, а чёрная дыра выпускает гравитационный импульс.</string>
+    <string name="unlock_toggle_description">Включить или выключить анимацию на разблокировку</string>
+
+    <string name="install_wallpaper">Установить обои</string>
+    <string name="install_hint">Откроется системный выбор живых обоев. Выберите «ASCII Live Wallpaper» и примените.</string>
+    <string name="settings_live_note">Настройки применяются без перезапуска обоев.</string>
+    <string name="wallpaper_picker_missing">Не удалось открыть выбор живых обоев на этом устройстве.</string>
+
+    <string name="wallpaper_description">Пять вращающихся 3D-сцен и режим «Моё фото»: ASCII-символы или точечная матрица Nothing с настраиваемым цветом знаков и фона.</string>
+    <string name="wallpaper_author">ASCII Live Wallpaper</string>
+</resources>
