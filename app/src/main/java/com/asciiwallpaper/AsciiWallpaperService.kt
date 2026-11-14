@@ -17,6 +17,7 @@ import android.service.wallpaper.WallpaperService
 import android.util.Log
 import android.view.SurfaceHolder
 import androidx.core.content.ContextCompat
+import kotlin.math.roundToInt
 
 /**
  * Live wallpaper service.
@@ -61,6 +62,9 @@ class AsciiWallpaperService : WallpaperService() {
         private var charging = false
 
         @Volatile
+        private var batteryPercent = 50
+
+        @Volatile
         private var screenOn = true
 
         // These fields are only touched by renderThread.
@@ -76,21 +80,18 @@ class AsciiWallpaperService : WallpaperService() {
         private var userPresentSeen = false
         private var receiverRegistered = false
         private var batteryReceiverRegistered = false
-        @Volatile
-        private var audioSource: AudioReactiveSource? = null
 
         private val frameRunnable = object : Runnable {
             override fun run() {
                 frameScheduled = false
                 if (!visible || !surfaceReady || !screenOn) return
 
+                renderer.setBattery(charging, batteryPercent)
                 if (!renderStarted) {
                     renderStarted = true
                     renderer.updateSettings(settings)
                     renderer.setCornerPhase(cornerPhase)
                 }
-                renderer.setCharging(charging)
-                renderer.setAudioLevels(audioSource?.levels())
                 drawOneFrame(System.nanoTime())
 
                 if (visible && surfaceReady && screenOn &&
@@ -125,7 +126,6 @@ class AsciiWallpaperService : WallpaperService() {
                         userPresentSeen = true
                         mainHandler.removeCallbacks(screenOnFallback)
                         startRenderingIfPossible()
-                        refreshAudioSource()
                         requestUnlockAnimation()
                     }
 
@@ -135,7 +135,6 @@ class AsciiWallpaperService : WallpaperService() {
                         mainHandler.removeCallbacks(screenOnFallback)
                         mainHandler.postDelayed(screenOnFallback, 1_500L)
                         startRenderingIfPossible()
-                        refreshAudioSource()
                     }
 
                     Intent.ACTION_SCREEN_OFF -> {
@@ -143,7 +142,6 @@ class AsciiWallpaperService : WallpaperService() {
                         userPresentSeen = false
                         mainHandler.removeCallbacks(screenOnFallback)
                         stopRendering()
-                        refreshAudioSource()
                     }
                 }
             }
@@ -151,10 +149,13 @@ class AsciiWallpaperService : WallpaperService() {
 
         private val batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                charging = when (intent?.action) {
-                    Intent.ACTION_POWER_CONNECTED -> true
-                    Intent.ACTION_POWER_DISCONNECTED -> false
-                    else -> isCharging(intent)
+                when (intent?.action) {
+                    Intent.ACTION_POWER_CONNECTED -> charging = true
+                    Intent.ACTION_POWER_DISCONNECTED -> charging = false
+                    else -> {
+                        charging = isCharging(intent)
+                        readBatteryPercent(intent)?.let { batteryPercent = it }
+                    }
                 }
             }
         }
@@ -167,23 +168,23 @@ class AsciiWallpaperService : WallpaperService() {
             } catch (_: Throwable) {
                 true
             }
-            charging = readCharging()
+            val initialBattery = readBatteryStatus()
+            charging = initialBattery.first
+            batteryPercent = initialBattery.second
             prefs.registerOnSharedPreferenceChangeListener(this)
             registerScreenReceiver()
             registerBatteryReceiver()
             renderHandler.post {
+                renderer.setBattery(charging, batteryPercent)
                 renderer.updateSettings(settings)
                 renderer.setCornerPhase(cornerPhase)
-                renderer.setCharging(charging)
             }
-            refreshAudioSource()
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder?) {
             super.onSurfaceCreated(holder)
             surfaceReady = true
             startRenderingIfPossible()
-            refreshAudioSource()
         }
 
         override fun onSurfaceChanged(
@@ -200,18 +201,15 @@ class AsciiWallpaperService : WallpaperService() {
         override fun onSurfaceDestroyed(holder: SurfaceHolder?) {
             surfaceReady = false
             stopRendering()
-            refreshAudioSource()
             super.onSurfaceDestroyed(holder)
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
             this.visible = visible
             if (visible) {
-                refreshAudioSource()
                 startRenderingIfPossible()
             } else {
                 stopRendering()
-                refreshAudioSource()
             }
         }
 
@@ -227,12 +225,12 @@ class AsciiWallpaperService : WallpaperService() {
             val targetChanged = updated.targetFps != settings.targetFps
             settings = updated
             renderHandler.post {
+                renderer.setBattery(charging, batteryPercent)
                 renderer.updateSettings(updated)
                 if (targetChanged) {
                     nextFrameAtMillis = 0L
                 }
             }
-            refreshAudioSource()
             startRenderingIfPossible(force = true)
         }
 
@@ -247,6 +245,7 @@ class AsciiWallpaperService : WallpaperService() {
                 if (!renderStarted || force) {
                     val freshStart = !renderStarted
                     renderStarted = true
+                    renderer.setBattery(charging, batteryPercent)
                     renderer.updateSettings(settings)
                     // Resetting the corner positions on every color or
                     // density edit would snap a running unlock animation.
@@ -371,7 +370,7 @@ class AsciiWallpaperService : WallpaperService() {
             }
         }
 
-        private fun readCharging(): Boolean {
+        private fun readBatteryStatus(): Pair<Boolean, Int> {
             val intent = try {
                 appContext.registerReceiver(
                     null,
@@ -380,7 +379,14 @@ class AsciiWallpaperService : WallpaperService() {
             } catch (_: Throwable) {
                 null
             }
-            return isCharging(intent)
+            return Pair(isCharging(intent), readBatteryPercent(intent) ?: 50)
+        }
+
+        private fun readBatteryPercent(intent: Intent?): Int? {
+            val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            if (level < 0 || scale <= 0) return null
+            return (level * 100f / scale).roundToInt().coerceIn(0, 100)
         }
 
         private fun isCharging(intent: Intent?): Boolean {
@@ -389,24 +395,10 @@ class AsciiWallpaperService : WallpaperService() {
             val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
             // EXTRA_STATUS can briefly be NOT_CHARGING while a cable is
             // connected (charge limit, thermal pause, battery-care modes).
-            // The requested arc is about the cable being connected.
+            // What matters here is whether external power is connected.
             return status == BatteryManager.BATTERY_STATUS_CHARGING ||
                 status == BatteryManager.BATTERY_STATUS_FULL ||
                 plugged != 0
-        }
-
-        private fun refreshAudioSource() {
-            if (visible && surfaceReady && screenOn &&
-                settings.style == ShapeStyle.WAVES &&
-                settings.audioReactiveEnabled
-            ) {
-                if (audioSource == null) {
-                    audioSource = AudioReactiveSource(appContext)
-                }
-                audioSource?.start()
-            } else {
-                audioSource?.stop()
-            }
         }
 
         private fun registerScreenReceiver() {
@@ -465,8 +457,6 @@ class AsciiWallpaperService : WallpaperService() {
             surfaceReady = false
             visible = false
             stopRendering()
-            audioSource?.stop()
-            audioSource = null
             prefs.unregisterOnSharedPreferenceChangeListener(this)
             unregisterScreenReceiver()
             unregisterBatteryReceiver()

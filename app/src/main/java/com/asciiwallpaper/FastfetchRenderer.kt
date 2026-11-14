@@ -22,8 +22,8 @@ import kotlin.math.roundToInt
  *
  * This is the one style that deliberately bypasses the luminance-to-glyph
  * filter. System information has to stay readable at normal viewing distance,
- * so it is drawn directly with the bundled monospace font. The Android robot
- * artwork still follows the selected ASCII/Nothing symbol mode.
+ * so it is drawn directly with the bundled monospace font. The shared Android
+ * ASCII artwork still follows the selected ASCII/Nothing symbol mode.
  */
 class FastfetchRenderer(private val context: Context?) {
     companion object {
@@ -34,21 +34,10 @@ class FastfetchRenderer(private val context: Context?) {
         // started at 8% but still allowed a full-width line, clipping the
         // right end of long kernel lines.
         private const val SIDE_MARGIN = 0.02f
-        private val ART = arrayOf(
-            "          .-'''-.          ",
-            "         /  .-.  \\         ",
-            "        |  (o o)  |        ",
-            "        |   \\_/   |        ",
-            "         \\  ___  /         ",
-            "          '-...-'          ",
-            "       .-'''     '''-.     ",
-            "      /  .-.     .-.  \\    ",
-            "     |  (   )   (   )  |   ",
-            "      \\  '-'     '-'  /    ",
-            "       '--.       .--'     ",
-            "          /_/   \\_\\        ",
-            "         /_/     \\_\\       "
-        )
+        // The shared Android logo is 18 lines tall. On a 16:9 preview or a
+        // landscape phone the layout needs more than the old 96-column cap to
+        // keep the complete logo and all system lines on screen.
+        private const val MAX_GRID_COLUMNS = 128
     }
 
     private val typeface: Typeface = if (context != null) {
@@ -98,14 +87,14 @@ class FastfetchRenderer(private val context: Context?) {
         // (about 7sp on a 1080px-wide display). Keep the info block readable;
         // the user can still choose the lower density for even larger text.
         val requested = columns.coerceIn(40, 48)
-        val totalLines = ART.size + info.size + 2
+        val totalLines = AndroidAsciiArt.HEIGHT + info.size + 2
         val contentWidth = width.toFloat() * (1f - SIDE_MARGIN * 2f)
         val left = width * SIDE_MARGIN
         var gridColumns = requested
         var cellWidth = contentWidth / gridColumns
         var lineHeight = cellWidth * 1.58f
         while (lineHeight * (totalLines + 1) > height * 0.90f &&
-            gridColumns < 96
+            gridColumns < MAX_GRID_COLUMNS
         ) {
             gridColumns += 2
             cellWidth = contentWidth / gridColumns
@@ -129,9 +118,9 @@ class FastfetchRenderer(private val context: Context?) {
         var baseline = max(height * 0.06f, (height - contentHeight) * 0.5f) +
             baselineShift
         val artX = left + contentWidth * 0.5f -
-            (ART.maxOf { it.length } * cellWidth) * 0.5f
+            (AndroidAsciiArt.WIDTH * cellWidth) * 0.5f
 
-        for (line in ART) {
+        for (line in AndroidAsciiArt.LINES) {
             if (symbolStyle == SymbolStyle.NOTHING) {
                 drawArtDots(canvas, line, artX, baseline, cellWidth, lineHeight, glyphColorArgb)
             } else {
@@ -167,18 +156,18 @@ class FastfetchRenderer(private val context: Context?) {
         glyphColorArgb: Int
     ) {
         dotPaint.color = glyphColorArgb
-        val radius = min(cellWidth, lineHeight) * 0.24f
+        val radius = min(cellWidth, lineHeight) * 0.27f
         val centerY = baseline - lineHeight * 0.36f
         for (index in line.indices) {
             val char = line[index]
             if (char == ' ') continue
             val density = when (char) {
-                '@', '#' -> 1f
-                '%', '*' -> 0.84f
-                '+', '=', 'o', 'O', '0' -> 0.72f
-                ':', ';' -> 0.56f
-                '.', '\'' -> 0.34f
-                else -> 0.64f
+                '@', '#', 'M', 'W' -> 1f
+                '%', '*', 'N', 'm', 'd' -> 0.86f
+                '+', '=', 'o', 'O', '0', 'y', 'h' -> 0.72f
+                ':', ';' -> 0.52f
+                '.', '\'', '`', '-' -> 0.32f
+                else -> 0.62f
             }
             dotPaint.strokeWidth = 0f
             canvas.drawCircle(

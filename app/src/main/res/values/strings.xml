@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">ASCII Live Wallpaper</string>
     <string name="settings_title">ASCII-обои</string>
-    <string name="settings_subtitle">Восемь сцен, фото, GIF и видео: ASCII-арт, точечная матрица Nothing, fastfetch, вращающийся Android и волны под музыку. Свои цвета, без сети.</string>
+    <string name="settings_subtitle">Восемь сцен, фото, GIF и видео: ASCII-арт, точечная матрица Nothing, fastfetch, ASCII-логотип Android и волны, которые собираются под музыку телефона. Свои цвета, без сети.</string>
 
     <string name="preview_title">ПРЕДПРОСМОТР / В РЕАЛЬНОМ ВРЕМЕНИ</string>
     <string name="preview_live">LIVE</string>
@@ -22,11 +22,11 @@
     <string name="style_black_hole">Чёрная дыра</string>
     <string name="style_black_hole_detail">Аккреционный диск · фотонное кольцо</string>
     <string name="style_fastfetch">Fastfetch</string>
-    <string name="style_fastfetch_detail">ASCII-робот и характеристики устройства — читаемым текстом</string>
-    <string name="style_android_logo">Android 3D</string>
-    <string name="style_android_logo_detail">Целый робот Android вращается по горизонтали</string>
+    <string name="style_fastfetch_detail">ASCII-логотип Android и характеристики устройства — читаемым текстом</string>
+    <string name="style_android_logo">Android</string>
+    <string name="style_android_logo_detail">Тот же ASCII-логотип Android, крупным планом</string>
     <string name="style_waves">Волны / музыка</string>
-    <string name="style_waves_detail">Три волны, дуга при зарядке и 12-полосный эквалайзер</string>
+    <string name="style_waves_detail">Три волны, уровень заряда и слияние в эквалайзер под музыку</string>
     <string name="style_photo">Моё фото / видео</string>
     <string name="style_photo_detail">Фото, GIF или видео · цвет → ч/б → знаки</string>
 
@@ -105,17 +105,8 @@
     <string name="color_cancel">Отмена</string>
     <string name="color_apply">Готово</string>
 
-    <string name="audio_reactive_title">Реакция на музыку</string>
-    <string name="audio_reactive_detail">12-полосный эквалайзер из микрофона. Включайте вручную: приложению понадобится доступ к микрофону. Если система не разрешит захват, волны останутся в обычном режиме.</string>
-    <string name="audio_reactive_toggle">Реагировать на музыку</string>
-    <string name="audio_permission_denied">Без доступа к микрофону эквалайзер не сможет реагировать на музыку.</string>
-    <string name="section_performance">ПРОИЗВОДИТЕЛЬНОСТЬ</string>
-    <string name="adaptive_performance_title">Адаптивная плотность</string>
-    <string name="adaptive_performance_detail">Если кадр не успевает, обои временно уменьшают число знаков и возвращают полную детализацию, когда устройство снова успевает. Это не меняет ваш ползунок плотности.</string>
-    <string name="adaptive_performance_toggle">Автоматически снижать нагрузку</string>
-
     <string name="unlock_title">Своя анимация на разблокировку</string>
-    <string name="unlock_detail">Макароны и кубы меняются местами, большой куб, ДНК и Android-робот на полсекунды раскручиваются, а чёрная дыра выпускает гравитационный импульс.</string>
+    <string name="unlock_detail">Макароны и кубы меняются местами, большой куб и ДНК на полсекунды раскручиваются, а чёрная дыра выпускает гравитационный импульс.</string>
     <string name="unlock_toggle_description">Включить или выключить анимацию на разблокировку</string>
 
     <string name="install_wallpaper">Установить обои</string>
@@ -123,6 +114,6 @@
     <string name="settings_live_note">Настройки применяются без перезапуска обоев.</string>
     <string name="wallpaper_picker_missing">Не удалось открыть выбор живых обоев на этом устройстве.</string>
 
-    <string name="wallpaper_description">Восемь сцен: 3D-фигуры, fastfetch, вращающийся Android, волны под музыку и фото/GIF/видео. ASCII-символы или точечная матрица Nothing с настраиваемым цветом.</string>
+    <string name="wallpaper_description">Восемь сцен: 3D-фигуры, fastfetch, ASCII-логотип Android, волны под музыку и фото/GIF/видео. ASCII-символы или точечная матрица Nothing с настраиваемым цветом.</string>
     <string name="wallpaper_author">ASCII Live Wallpaper</string>
 </resources>

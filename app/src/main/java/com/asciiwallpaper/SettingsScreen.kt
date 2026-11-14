@@ -1,12 +1,9 @@
 package com.asciiwallpaper
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -226,13 +223,6 @@ fun SettingsScreen(
     }
     var photoBusy by remember { mutableStateOf(false) }
     var photoError by remember { mutableStateOf(false) }
-    var audioReactive by rememberSaveable {
-        mutableStateOf(initialSettings.audioReactiveEnabled)
-    }
-    var audioError by remember { mutableStateOf(false) }
-    var adaptivePerformance by rememberSaveable {
-        mutableStateOf(initialSettings.adaptivePerformance)
-    }
     var showPhotoFitSheet by rememberSaveable { mutableStateOf(false) }
     var showGlyphColorPicker by rememberSaveable { mutableStateOf(false) }
     var showBackgroundColorPicker by rememberSaveable { mutableStateOf(false) }
@@ -254,51 +244,11 @@ fun SettingsScreen(
         unlockAnimationEnabled = unlockAnimationEnabled,
         photoRevision = photoRevision,
         photoFit = photoFit,
-        photoAnimated = photoAnimated,
-        audioReactiveEnabled = audioReactive,
-        adaptivePerformance = adaptivePerformance
+        photoAnimated = photoAnimated
     ).sanitized()
 
     fun commit(updated: WallpaperSettings = currentSettings) {
         onSettingsChanged(updated.sanitized())
-    }
-
-    val micPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            audioReactive = true
-            audioError = false
-            onSettingsChanged(
-                Prefs.load(appContext).copy(audioReactiveEnabled = true).sanitized()
-            )
-        } else {
-            audioReactive = false
-            audioError = true
-            onSettingsChanged(
-                Prefs.load(appContext).copy(audioReactiveEnabled = false).sanitized()
-            )
-        }
-    }
-
-    fun setAudioReactive(enabled: Boolean) {
-        if (!enabled) {
-            audioReactive = false
-            audioError = false
-            commit(currentSettings.copy(audioReactiveEnabled = false))
-            return
-        }
-        if (ContextCompat.checkSelfPermission(
-                appContext,
-                Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            audioReactive = true
-            audioError = false
-            commit(currentSettings.copy(audioReactiveEnabled = true))
-        } else {
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
     }
 
     val photoPicker = rememberLauncherForActivityResult(
@@ -507,73 +457,62 @@ fun SettingsScreen(
                     )
                 }
 
-                SettingsCard {
-                    SectionLabel(
-                        stringResource(
-                            if (style == ShapeStyle.PHOTO) {
-                                R.string.section_resolution_photo
-                            } else {
-                                R.string.section_resolution
-                            }
+                if (style != ShapeStyle.ANDROID_LOGO) {
+                    SettingsCard {
+                        SectionLabel(
+                            stringResource(
+                                if (style == ShapeStyle.PHOTO) {
+                                    R.string.section_resolution_photo
+                                } else {
+                                    R.string.section_resolution
+                                }
+                            )
                         )
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    LabelWithValue(
-                        title = stringResource(
-                            if (style == ShapeStyle.PHOTO) {
-                                R.string.photo_resolution_title
-                            } else {
-                                R.string.resolution_title
-                            }
-                        ),
-                        value = stringResource(R.string.resolution_value, shownColumns)
-                    )
-                    Slider(
-                        value = columns,
-                        onValueChange = { columns = it },
-                        onValueChangeFinished = {
-                            commit(currentSettings.copy(columns = columns.roundToInt()))
-                        },
-                        valueRange = WallpaperSettings.MIN_COLUMNS.toFloat()..
-                            WallpaperSettings.MAX_COLUMNS.toFloat(),
-                        steps = 39,
-                        colors = asciiSliderColors()
-                    )
-                    SliderLimits(
-                        start = WallpaperSettings.MIN_COLUMNS.toString(),
-                        end = WallpaperSettings.MAX_COLUMNS.toString()
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = stringResource(
-                            if (style == ShapeStyle.PHOTO) {
-                                R.string.photo_resolution_hint
-                            } else {
-                                R.string.resolution_hint
-                            }
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextMuted
-                    )
-                }
-
-                if (style == ShapeStyle.WAVES) {
-                    InfoToggleCard(
-                        icon = "♪",
-                        title = stringResource(R.string.audio_reactive_title),
-                        detail = stringResource(R.string.audio_reactive_detail) +
-                            if (audioError) {
-                                "\n\n" + stringResource(R.string.audio_permission_denied)
-                            } else {
-                                ""
+                        Spacer(Modifier.height(10.dp))
+                        LabelWithValue(
+                            title = stringResource(
+                                if (style == ShapeStyle.PHOTO) {
+                                    R.string.photo_resolution_title
+                                } else {
+                                    R.string.resolution_title
+                                }
+                            ),
+                            value = stringResource(R.string.resolution_value, shownColumns)
+                        )
+                        Slider(
+                            value = columns,
+                            onValueChange = { columns = it },
+                            onValueChangeFinished = {
+                                commit(currentSettings.copy(columns = columns.roundToInt()))
                             },
-                        enabled = audioReactive,
-                        toggleDescription = stringResource(R.string.audio_reactive_toggle),
-                        onToggle = ::setAudioReactive
-                    )
+                            valueRange = WallpaperSettings.MIN_COLUMNS.toFloat()..
+                                WallpaperSettings.MAX_COLUMNS.toFloat(),
+                            steps = 39,
+                            colors = asciiSliderColors()
+                        )
+                        SliderLimits(
+                            start = WallpaperSettings.MIN_COLUMNS.toString(),
+                            end = WallpaperSettings.MAX_COLUMNS.toString()
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(
+                                if (style == ShapeStyle.PHOTO) {
+                                    R.string.photo_resolution_hint
+                                } else {
+                                    R.string.resolution_hint
+                                }
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextMuted
+                        )
+                    }
                 }
 
-                if (style != ShapeStyle.PHOTO && style != ShapeStyle.FASTFETCH) {
+                if (style != ShapeStyle.PHOTO &&
+                    style != ShapeStyle.FASTFETCH &&
+                    style != ShapeStyle.ANDROID_LOGO
+                ) {
                     SettingsCard {
                         SectionLabel(stringResource(R.string.section_motion))
                         Spacer(Modifier.height(10.dp))
@@ -664,46 +603,6 @@ fun SettingsScreen(
                                     unlockAnimationEnabled = enabled
                                 ))
                             }
-                        )
-                    }
-                }
-
-                SettingsCard {
-                    SectionLabel(stringResource(R.string.section_performance))
-                    Spacer(Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(R.string.adaptive_performance_title),
-                                style = MaterialTheme.typography.titleMedium,
-                                color = TextPrimary
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = stringResource(R.string.adaptive_performance_detail),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextMuted
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Switch(
-                            checked = adaptivePerformance,
-                            onCheckedChange = { enabled ->
-                                adaptivePerformance = enabled
-                                commit(currentSettings.copy(
-                                    adaptivePerformance = enabled
-                                ))
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = AppBackground,
-                                checkedTrackColor = AccentGreenStrong,
-                                uncheckedThumbColor = TextMuted,
-                                uncheckedTrackColor = Color(0xFF263A2B),
-                                uncheckedBorderColor = PanelBorder
-                            )
                         )
                     }
                 }
@@ -1189,7 +1088,7 @@ private fun previewStyleBadge(style: ShapeStyle): String = when (style) {
     ShapeStyle.DNA -> "DNA HELIX"
     ShapeStyle.BLACK_HOLE -> "EVENT HORIZON"
     ShapeStyle.FASTFETCH -> "FASTFETCH"
-    ShapeStyle.ANDROID_LOGO -> "ANDROID 3D"
+    ShapeStyle.ANDROID_LOGO -> "ANDROID ASCII"
     ShapeStyle.WAVES -> "WAVES / AUDIO"
     ShapeStyle.PHOTO -> "MEDIA"
 }
@@ -1216,10 +1115,12 @@ private fun LiveAsciiPreview(
         // avoids flooding Compose with state writes on high-refresh displays;
         // the wallpaper engine keeps its own target. Fastfetch is static text,
         // so a few refreshes per second are plenty.
-        if (settings.style == ShapeStyle.PHOTO && !settings.photoAnimated) {
-            // A still photo is already complete after its first draw. The
-            // Canvas is invalidated by recomposition whenever a setting
-            // changes, so a permanent 12 fps redraw only heats the phone.
+        if ((settings.style == ShapeStyle.PHOTO && !settings.photoAnimated) ||
+            settings.style == ShapeStyle.ANDROID_LOGO
+        ) {
+            // A still photo and the static Android logo are complete after
+            // their first draw. Recomposition redraws them when a setting
+            // changes, so a permanent frame loop would only heat the phone.
             return@LaunchedEffect
         }
         val previewFps = when (settings.style) {
@@ -1879,65 +1780,6 @@ private fun UnlockNoteCard(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = stringResource(R.string.unlock_detail),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextMuted
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            Switch(
-                checked = enabled,
-                onCheckedChange = onToggle,
-                modifier = Modifier.semantics {
-                    contentDescription = toggleDescription
-                },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = AppBackground,
-                    checkedTrackColor = AccentGreenStrong,
-                    uncheckedThumbColor = TextMuted,
-                    uncheckedTrackColor = Color(0xFF263A2B),
-                    uncheckedBorderColor = PanelBorder
-                )
-            )
-        }
-    }
-}
-
-@Composable
-private fun InfoToggleCard(
-    icon: String,
-    title: String,
-    detail: String,
-    enabled: Boolean,
-    toggleDescription: String,
-    onToggle: (Boolean) -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0B150D)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF243D29))
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = icon,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 25.sp,
-                color = AccentGreen
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (enabled) TextPrimary else TextMuted
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = detail,
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted
                 )

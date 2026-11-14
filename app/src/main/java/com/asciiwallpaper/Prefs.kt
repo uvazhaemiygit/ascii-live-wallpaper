@@ -82,19 +82,7 @@ data class WallpaperSettings(
     val photoRevision: Int = 0,
     val photoFit: PhotoFit = PhotoFit.CONTAIN,
     /** True while the current photo revision is a GIF/video frame set. */
-    val photoAnimated: Boolean = false,
-    /**
-     * Microphone-driven 12-band visualiser for the WAVES style. It is strictly
-     * opt-in: the settings screen asks for RECORD_AUDIO only when the user
-     * turns this on.
-     */
-    val audioReactiveEnabled: Boolean = false,
-    /**
-     * When enabled the renderer silently lowers the effective character grid
-     * if a frame is too expensive. The preference itself is never rewritten;
-     * the full density returns as soon as the device can keep up.
-     */
-    val adaptivePerformance: Boolean = true
+    val photoAnimated: Boolean = false
 ) {
     fun sanitized(): WallpaperSettings = copy(
         columns = columns.coerceIn(MIN_COLUMNS, MAX_COLUMNS),
@@ -147,8 +135,6 @@ object Prefs {
     private const val KEY_PHOTO_REVISION = "photo_revision"
     private const val KEY_PHOTO_FIT = "photo_fit"
     private const val KEY_PHOTO_ANIMATED = "photo_animated"
-    private const val KEY_AUDIO_REACTIVE = "audio_reactive"
-    private const val KEY_ADAPTIVE_PERFORMANCE = "adaptive_performance"
     private const val KEY_CORNER_PHASE = "corner_phase"
 
     /** Preference keys that affect the renderer. Corner state is intentionally excluded. */
@@ -164,9 +150,7 @@ object Prefs {
         KEY_UNLOCK_ANIMATION,
         KEY_PHOTO_REVISION,
         KEY_PHOTO_FIT,
-        KEY_PHOTO_ANIMATED,
-        KEY_AUDIO_REACTIVE,
-        KEY_ADAPTIVE_PERFORMANCE
+        KEY_PHOTO_ANIMATED
     )
 
     fun sharedPreferences(context: Context): SharedPreferences =
@@ -201,9 +185,7 @@ object Prefs {
             unlockAnimationEnabled = p.getBoolean(KEY_UNLOCK_ANIMATION, true),
             photoRevision = p.getInt(KEY_PHOTO_REVISION, 0),
             photoFit = PhotoFit.fromValue(p.getString(KEY_PHOTO_FIT, null)),
-            photoAnimated = p.getBoolean(KEY_PHOTO_ANIMATED, false),
-            audioReactiveEnabled = p.getBoolean(KEY_AUDIO_REACTIVE, false),
-            adaptivePerformance = p.getBoolean(KEY_ADAPTIVE_PERFORMANCE, true)
+            photoAnimated = p.getBoolean(KEY_PHOTO_ANIMATED, false)
         ).sanitized()
     }
 
@@ -222,8 +204,6 @@ object Prefs {
             .putInt(KEY_PHOTO_REVISION, clean.photoRevision)
             .putString(KEY_PHOTO_FIT, clean.photoFit.prefValue)
             .putBoolean(KEY_PHOTO_ANIMATED, clean.photoAnimated)
-            .putBoolean(KEY_AUDIO_REACTIVE, clean.audioReactiveEnabled)
-            .putBoolean(KEY_ADAPTIVE_PERFORMANCE, clean.adaptivePerformance)
             .apply()
     }
 

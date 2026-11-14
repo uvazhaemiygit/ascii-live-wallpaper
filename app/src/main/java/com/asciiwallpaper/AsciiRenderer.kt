@@ -59,27 +59,20 @@ class AsciiRenderer(private val context: Context? = null) {
     private val blackHoleScene = BlackHoleSceneRenderer()
     private val waveScene = WaveSceneRenderer()
     private val fastfetchRenderer = FastfetchRenderer(context)
-    private val robotMesh = RobotMesh.create()
+    private val androidLogoRenderer = AndroidLogoRenderer(context)
+    private val musicSignal = MusicSignal(context)
 
     private var settings = WallpaperSettings()
     private var sceneBitmap: Bitmap? = null
     private var sceneCanvas: Canvas? = null
     private var sceneWidth = 0
     private var sceneHeight = 0
-    private var robotAngle = 18f
     private var charging = false
-    private val audioLevels = FloatArray(12)
+    private var batteryPercent = 50
     private var mediaFrameSet: MediaAsciiStore.FrameSet? = null
 
-    // Adaptive quality is intentionally local to the renderer. The user's
-    // density preference is never changed; only this session's glyph count
-    // follows the measured frame budget.
-    private var adaptiveColumns = 0
-    private var adaptiveEmaNanos = 0f
-    private var adaptiveCooldown = 0
-
     init {
-        charging = context?.let { ctx ->
+        context?.let { ctx ->
             try {
                 val battery = ctx.registerReceiver(
                     null,
@@ -87,13 +80,21 @@ class AsciiRenderer(private val context: Context? = null) {
                 )
                 val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
                 val plugged = battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
-                status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
                     status == BatteryManager.BATTERY_STATUS_FULL ||
                     plugged != 0
+                batteryPercent = readBatteryPercent(battery) ?: batteryPercent
             } catch (_: Throwable) {
-                false
+                Unit
             }
-        } ?: false
+        }
+    }
+
+    private fun readBatteryPercent(intent: Intent?): Int? {
+        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        if (level < 0 || scale <= 0) return null
+        return (level * 100f / scale).roundToInt().coerceIn(0, 100)
     }
 
     private var lastFrameNanos = 0L
@@ -162,6 +163,10 @@ class AsciiRenderer(private val context: Context? = null) {
         style = Paint.Style.FILL
         isAntiAlias = false
     }
+    private val batteryOverlayPaint = Paint().apply {
+        style = Paint.Style.FILL
+        isAntiAlias = false
+    }
     private val edgePaint = Paint().apply {
         style = Paint.Style.STROKE
         color = 0xFFF4FFF4.toInt()
@@ -184,7 +189,6 @@ class AsciiRenderer(private val context: Context? = null) {
         if (newSettings === settings) return
         val clean = newSettings.sanitized()
         val styleChanged = clean.style != settings.style
-        val columnsChanged = clean.columns != settings.columns
         val revisionChanged = clean.photoRevision != settings.photoRevision
 
         if (styleChanged) {
@@ -197,17 +201,13 @@ class AsciiRenderer(private val context: Context? = null) {
                 setCornerPhase(cornerPhase)
             }
             if (clean.style == ShapeStyle.WAVES) {
-                // The waveform advances even while another style is visible.
-                // Without this reset a charger connected earlier would have
-                // already decayed its green flash and the arc would appear
-                // without the requested fade.
-                waveScene.onShown(charging)
+                // Set the battery meter to the current state and let the
+                // normal per-frame easing handle any later plug/unplug. Clear
+                // the cached playback state so a stale "music playing" value
+                // from before a pause is never shown on re-entry.
+                musicSignal.reset()
+                waveScene.onShown(charging, batteryPercent)
             }
-        }
-        if (styleChanged || columnsChanged) {
-            adaptiveColumns = clean.columns
-            adaptiveEmaNanos = 0f
-            adaptiveCooldown = 0
         }
         settings = clean
 
@@ -228,18 +228,9 @@ class AsciiRenderer(private val context: Context? = null) {
      * reads the sticky battery state once at construction and is also allowed
      * to set it explicitly.
      */
-    fun setCharging(value: Boolean) {
-        charging = value
-    }
-
-    fun setAudioLevels(levels: FloatArray?) {
-        if (levels == null || levels.size < audioLevels.size) {
-            audioLevels.fill(0f)
-            return
-        }
-        for (i in audioLevels.indices) {
-            audioLevels[i] = levels[i].coerceIn(0f, 1f)
-        }
+    fun setBattery(valueCharging: Boolean, percent: Int) {
+        charging = valueCharging
+        batteryPercent = percent.coerceIn(0, 100)
     }
 
     fun hasAnimatedMedia(): Boolean = mediaFrameSet != null
@@ -248,8 +239,12 @@ class AsciiRenderer(private val context: Context? = null) {
     fun animatedFrameRate(): Int =
         mediaFrameSet?.fps?.roundToInt()?.coerceIn(1, 30) ?: 12
 
-    fun needsContinuousRendering(): Boolean =
-        settings.style != ShapeStyle.PHOTO || mediaFrameSet != null
+    fun needsContinuousRendering(): Boolean {
+        // The Android logo is deliberately static: the same fastfetch ASCII
+        // artwork is drawn once and only redrawn for a setting/surface change.
+        if (settings.style == ShapeStyle.ANDROID_LOGO) return false
+        return settings.style != ShapeStyle.PHOTO || mediaFrameSet != null
+    }
 
     /**
      * Немедленно устанавливает расстановку (например, при старте обоев,
@@ -273,10 +268,11 @@ class AsciiRenderer(private val context: Context? = null) {
      */
     fun onUnlock(phase: Int, timeNanos: Long) {
         cornerPhase = phase and 1
-        if (settings.style == ShapeStyle.PHOTO) {
-            // A still photo should not rotate or sparkle. The lock-screen
-            // toggle is hidden in photo mode, but a stale broadcast must still
-            // be harmless if the user switched styles in the meantime.
+        if (settings.style == ShapeStyle.PHOTO ||
+            settings.style == ShapeStyle.ANDROID_LOGO
+        ) {
+            // Static styles should not rotate or sparkle. Their lock-screen
+            // toggle is hidden, but a stale broadcast must still be harmless.
             unlockEffectStyle = null
             unlockEffectStartNanos = 0L
         } else if (settings.style.usesCornerSwap) {
@@ -318,9 +314,6 @@ class AsciiRenderer(private val context: Context? = null) {
         if (width <= 1 || height <= 1) return
 
         updateSettings(newSettings)
-        // Load/import work must not be mistaken for the cost of a normal
-        // frame; adaptive quality should react to drawing, not disk I/O.
-        val started = System.nanoTime()
 
         val dt = if (lastFrameNanos == 0L) {
             0f
@@ -334,7 +327,19 @@ class AsciiRenderer(private val context: Context? = null) {
 
         advanceRotation(dt, timeNanos)
         updateCornerAnimation(timeNanos)
-        waveScene.advance(dt, charging, audioLevels)
+        val waveSpeed = (settings.speedDegPerSec / 9f).coerceIn(0.25f, 5f)
+        val waveTime = elapsedSeconds * waveSpeed
+        if (settings.style == ShapeStyle.WAVES) {
+            musicSignal.poll(timeNanos)
+            waveScene.advance(
+                dt = dt,
+                charging = charging,
+                batteryPercent = batteryPercent,
+                musicActive = musicSignal.isPlaying,
+                musicVolume = musicSignal.volume,
+                timeSeconds = waveTime
+            )
+        }
 
         if (settings.style == ShapeStyle.FASTFETCH) {
             fastfetchRenderer.draw(
@@ -347,7 +352,18 @@ class AsciiRenderer(private val context: Context? = null) {
                 symbolStyle = settings.symbolStyle,
                 charging = charging
             )
-            updateAdaptiveColumns(started)
+            return
+        }
+
+        if (settings.style == ShapeStyle.ANDROID_LOGO) {
+            androidLogoRenderer.draw(
+                canvas = canvas,
+                width = width,
+                height = height,
+                glyphColorArgb = settings.glyphColorArgb,
+                backgroundColorArgb = settings.backgroundColorArgb,
+                symbolStyle = settings.symbolStyle
+            )
             return
         }
 
@@ -362,17 +378,16 @@ class AsciiRenderer(private val context: Context? = null) {
                 sourceHeight = frameSet.height,
                 viewWidth = width,
                 viewHeight = height,
-                requestedColumns = renderColumns(),
+                requestedColumns = settings.columns,
                 glyphColorArgb = settings.glyphColorArgb,
                 backgroundColorArgb = settings.backgroundColorArgb,
                 fit = settings.photoFit,
                 symbolStyle = settings.symbolStyle
             )
-            updateAdaptiveColumns(started)
             return
         }
 
-        val columns = renderColumns()
+        val columns = settings.columns
         ensureScene(width, height, columns)
 
         val bitmap = sceneBitmap ?: return
@@ -391,69 +406,33 @@ class AsciiRenderer(private val context: Context? = null) {
             photoRamp = settings.style == ShapeStyle.PHOTO,
             symbolStyle = settings.symbolStyle
         )
-        updateAdaptiveColumns(started)
-    }
-
-    private fun renderColumns(): Int {
-        if (!settings.adaptivePerformance) {
-            adaptiveColumns = settings.columns
-            return settings.columns
-        }
-        if (adaptiveColumns == 0) adaptiveColumns = settings.columns
-        return adaptiveColumns.coerceIn(
-            WallpaperSettings.MIN_COLUMNS,
-            WallpaperSettings.MAX_COLUMNS
-        )
-    }
-
-    private fun updateAdaptiveColumns(startedNanos: Long) {
-        if (!settings.adaptivePerformance) {
-            adaptiveColumns = settings.columns
-            return
-        }
-        if (settings.style == ShapeStyle.FASTFETCH ||
-            settings.style == ShapeStyle.PHOTO && mediaFrameSet == null
-        ) {
-            // Fastfetch has its own 1 fps text path, and a still photo draws
-            // once. Reducing their density based on a 60/120 fps budget would
-            // punish the user for a load that is not a continuous frame loop.
-            return
-        }
-        val effectiveFps = if (settings.style == ShapeStyle.PHOTO) {
-            animatedFrameRate()
-        } else {
-            settings.targetFps.coerceAtLeast(1)
-        }
-        val elapsed = (System.nanoTime() - startedNanos).toFloat()
-        adaptiveEmaNanos = if (adaptiveEmaNanos == 0f) {
-            elapsed
-        } else {
-            adaptiveEmaNanos * 0.88f + elapsed * 0.12f
-        }
-        if (adaptiveCooldown > 0) {
-            adaptiveCooldown--
-            return
-        }
-        val budget = 1_000_000_000f / effectiveFps.coerceAtLeast(1)
-        if (adaptiveEmaNanos > budget * 1.30f &&
-            adaptiveColumns > WallpaperSettings.MIN_COLUMNS
-        ) {
-            adaptiveColumns = (adaptiveColumns - 12)
-                .coerceAtLeast(WallpaperSettings.MIN_COLUMNS)
-            adaptiveEmaNanos *= 0.50f
-            adaptiveCooldown = 7
-        } else if (adaptiveEmaNanos < budget * 0.55f &&
-            adaptiveColumns < settings.columns
-        ) {
-            adaptiveColumns = (adaptiveColumns + 3).coerceAtMost(settings.columns)
-            adaptiveEmaNanos *= 0.72f
-            adaptiveCooldown = 30
+        if (settings.style == ShapeStyle.WAVES) {
+            drawBatteryOverlay(canvas, width, height)
         }
     }
 
     /**
-     * The WAVES style briefly tints the whole glyph grid green when a charger
-     * is connected. The rest of the styles keep the user's selected colour.
+     * A translucent green wash below the battery line. The scene already turns
+     * the filled area into dense glyphs; this tint makes the lower part read as
+     * a green battery fill on both black and custom backgrounds without using
+     * a bitmap or another filter pass.
+     */
+    private fun drawBatteryOverlay(canvas: Canvas, width: Int, height: Int) {
+        val amount = waveScene.chargeColorMix()
+        if (amount <= 0.001f) return
+        val top = height * waveScene.batteryFillTopFraction()
+        batteryOverlayPaint.color = Color.argb(
+            (amount * 74f).toInt().coerceIn(0, 255),
+            22,
+            196,
+            74
+        )
+        canvas.drawRect(0f, top, width.toFloat(), height.toFloat(), batteryOverlayPaint)
+    }
+
+    /**
+     * The WAVES style blends the glyph colour towards green while the battery
+     * meter is visible. The rest of the styles keep the selected colour.
      */
     private fun effectiveGlyphColor(): Int {
         if (settings.style != ShapeStyle.WAVES) return settings.glyphColorArgb
@@ -500,18 +479,6 @@ class AsciiRenderer(private val context: Context? = null) {
                 blackHoleSpin = wrapDegrees(
                     blackHoleSpin + speed * BLACK_HOLE_SPEED_SCALE * dt * boost
                 )
-            }
-
-            ShapeStyle.ANDROID_LOGO -> {
-                val boost = if (unlockEffectStyle == ShapeStyle.ANDROID_LOGO) {
-                    boostEnvelope(
-                        (timeNanos - unlockEffectStartNanos) / 1_000_000_000f,
-                        2.5f
-                    )
-                } else {
-                    1f
-                }
-                robotAngle = wrapDegrees(robotAngle + speed * dt * 1.35f * boost)
             }
 
             else -> Unit
@@ -632,40 +599,20 @@ class AsciiRenderer(private val context: Context? = null) {
                 )
             }
 
-            ShapeStyle.ANDROID_LOGO -> {
-                // The mesh is taller than the cube's unit box. In portrait the
-                // width is the useful limit; in landscape the height is much
-                // smaller, so cap both to keep the antennae and feet on-screen.
-                val radius = min(width * 0.68f, height * 0.44f)
-                drawObject(
-                    canvas = canvas,
-                    mesh = robotMesh,
-                    centerX = width * 0.5f,
-                    centerY = height * 0.51f,
-                    radius = radius,
-                    rx = -7f,
-                    ry = robotAngle,
-                    rz = 0f,
-                    drawEdges = false,
-                    outline = true,
-                    edgeWidthScale = 0.72f
-                )
-            }
+            ShapeStyle.ANDROID_LOGO, ShapeStyle.FASTFETCH -> Unit
 
             ShapeStyle.WAVES -> {
+                val waveSpeed = (settings.speedDegPerSec / 9f)
+                    .coerceIn(0.25f, 5f)
                 waveScene.draw(
                     canvas = canvas,
                     width = width,
                     height = height,
                     columns = columns,
-                    timeSeconds = elapsedSeconds,
-                    lineWidthScale = settings.lineWidth,
-                    speedScale = (settings.speedDegPerSec / 9f)
-                        .coerceIn(0.25f, 5f)
+                    timeSeconds = elapsedSeconds * waveSpeed,
+                    lineWidthScale = settings.lineWidth
                 )
             }
-
-            ShapeStyle.FASTFETCH -> Unit
 
             ShapeStyle.PHOTO -> drawPhoto(canvas, width, height)
         }
