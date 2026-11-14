@@ -15,6 +15,19 @@ import androidx.compose.ui.platform.LocalContext
 
 class SettingsActivity : ComponentActivity() {
 
+    override fun onStart() {
+        super.onStart()
+        // Pause a still-running wallpaper engine before the heavy live
+        // preview becomes visible. This also covers ROMs that do not deliver
+        // WallpaperService.Engine.onVisibilityChanged(false) promptly.
+        AppUiState.setSettingsVisible(true)
+    }
+
+    override fun onStop() {
+        AppUiState.setSettingsVisible(false)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(

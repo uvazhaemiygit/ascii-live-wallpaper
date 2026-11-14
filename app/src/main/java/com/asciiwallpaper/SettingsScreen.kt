@@ -208,8 +208,11 @@ fun SettingsScreen(
     }
     var columns by rememberSaveable { mutableStateOf(initialSettings.columns.toFloat()) }
     var speed by rememberSaveable { mutableStateOf(initialSettings.speedDegPerSec) }
-    var waveHeight by rememberSaveable {
-        mutableIntStateOf(initialSettings.waveHeightPercent)
+    var waveBeat by rememberSaveable {
+        mutableIntStateOf(initialSettings.waveBeatPercent)
+    }
+    var waveSpread by rememberSaveable {
+        mutableIntStateOf(initialSettings.waveSpreadPercent)
     }
     var realSpectrum by rememberSaveable {
         mutableStateOf(initialSettings.realSpectrumEnabled)
@@ -257,7 +260,8 @@ fun SettingsScreen(
         backgroundColorArgb = backgroundColorValue,
         targetFps = targetFps,
         lineWidth = lineWidth,
-        waveHeightPercent = waveHeight,
+        waveBeatPercent = waveBeat,
+        waveSpreadPercent = waveSpread,
         realSpectrumEnabled = realSpectrum,
         unlockAnimationEnabled = unlockAnimationEnabled,
         photoRevision = photoRevision,
@@ -588,33 +592,65 @@ fun SettingsScreen(
                         if (style == ShapeStyle.WAVES) {
                             Spacer(Modifier.height(16.dp))
                             LabelWithValue(
-                                title = stringResource(R.string.wave_height_title),
+                                title = stringResource(R.string.wave_beat_title),
                                 value = stringResource(
-                                    R.string.wave_height_value,
-                                    waveHeight
+                                    R.string.wave_beat_value,
+                                    waveBeat
                                 )
                             )
                             Slider(
-                                value = waveHeight.toFloat(),
-                                onValueChange = { waveHeight = it.roundToInt() },
+                                value = waveBeat.toFloat(),
+                                onValueChange = { waveBeat = it.roundToInt() },
                                 onValueChangeFinished = {
                                     commit(currentSettings.copy(
-                                        waveHeightPercent = waveHeight
+                                        waveBeatPercent = waveBeat
                                     ))
                                 },
                                 valueRange =
-                                    WallpaperSettings.MIN_WAVE_HEIGHT_PERCENT.toFloat()..
-                                        WallpaperSettings.MAX_WAVE_HEIGHT_PERCENT.toFloat(),
+                                    WallpaperSettings.MIN_WAVE_BEAT_PERCENT.toFloat()..
+                                        WallpaperSettings.MAX_WAVE_BEAT_PERCENT.toFloat(),
                                 steps = 35,
                                 colors = asciiSliderColors()
                             )
                             SliderLimits(
-                                start = stringResource(R.string.wave_height_low),
-                                end = stringResource(R.string.wave_height_high)
+                                start = stringResource(R.string.wave_beat_low),
+                                end = stringResource(R.string.wave_beat_high)
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                text = stringResource(R.string.wave_height_hint),
+                                text = stringResource(R.string.wave_beat_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextMuted
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            LabelWithValue(
+                                title = stringResource(R.string.wave_spread_title),
+                                value = stringResource(
+                                    R.string.wave_spread_value,
+                                    waveSpread
+                                )
+                            )
+                            Slider(
+                                value = waveSpread.toFloat(),
+                                onValueChange = { waveSpread = it.roundToInt() },
+                                onValueChangeFinished = {
+                                    commit(currentSettings.copy(
+                                        waveSpreadPercent = waveSpread
+                                    ))
+                                },
+                                valueRange =
+                                    WallpaperSettings.MIN_WAVE_SPREAD_PERCENT.toFloat()..
+                                        WallpaperSettings.MAX_WAVE_SPREAD_PERCENT.toFloat(),
+                                steps = 19,
+                                colors = asciiSliderColors()
+                            )
+                            SliderLimits(
+                                start = stringResource(R.string.wave_spread_low),
+                                end = stringResource(R.string.wave_spread_high)
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = stringResource(R.string.wave_spread_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextMuted
                             )
@@ -833,7 +869,7 @@ fun SettingsScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "ASCII LIVE WALLPAPER  /  v1.4.0",
+                    text = "ASCII LIVE WALLPAPER  /  v1.4.1",
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted.copy(alpha = 0.55f),
@@ -1238,9 +1274,9 @@ private fun LiveAsciiPreview(
         settings.photoAnimated
     ) {
         // The preview does not need 120 fps to be useful. Capping it also
-        // avoids flooding Compose with state writes on high-refresh displays;
-        // the wallpaper engine keeps its own target. Fastfetch is static text,
-        // so a few refreshes per second are plenty.
+        // avoids flooding Compose with state writes and heavy ASCII canvas
+        // work on the UI thread; the wallpaper engine keeps its own target.
+        // Fastfetch is static text, so a few refreshes per second are plenty.
         if ((settings.style == ShapeStyle.PHOTO && !settings.photoAnimated) ||
             settings.style == ShapeStyle.ANDROID_LOGO
         ) {
@@ -1254,7 +1290,7 @@ private fun LiveAsciiPreview(
             // Animated media is cached at 12 fps; there is no point in
             // running the preview at 45 fps.
             ShapeStyle.PHOTO -> 12
-            else -> settings.targetFps.coerceIn(1, 45)
+            else -> settings.targetFps.coerceIn(1, 30)
         }
         val intervalNanos = 1_000_000_000L / previewFps
         var lastAccepted = 0L

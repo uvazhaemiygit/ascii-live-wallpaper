@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">ASCII Live Wallpaper</string>
     <string name="settings_title">ASCII-обои</string>
-    <string name="settings_subtitle">Восемь сцен, фото, GIF и видео: ASCII-арт, точечная матрица Nothing, fastfetch, ASCII-логотип Android и волны под музыку телефона с настраиваемой высотой. Свои цвета и палитра для «Обои и стиль», без сети.</string>
+    <string name="settings_subtitle">Восемь сцен, фото, GIF и видео: ASCII-арт, точечная матрица Nothing, fastfetch, ASCII-логотип Android и волны под музыку телефона с настраиваемым биением и шириной. Свои цвета и палитра для «Обои и стиль», без сети.</string>
 
     <string name="preview_title">ПРЕДПРОСМОТР / В РЕАЛЬНОМ ВРЕМЕНИ</string>
     <string name="preview_live">LIVE</string>
@@ -26,7 +26,7 @@
     <string name="style_android_logo">Android</string>
     <string name="style_android_logo_detail">Тот же ASCII-логотип Android, крупным планом</string>
     <string name="style_waves">Волны / музыка</string>
-    <string name="style_waves_detail">Три волны, настраиваемая высота, уровень заряда и эквалайзер под музыку</string>
+    <string name="style_waves_detail">Три волны, настраиваемые биение и ширина, уровень заряда и эквалайзер под музыку</string>
     <string name="style_photo">Моё фото / видео</string>
     <string name="style_photo_detail">Фото, GIF или видео · цвет → ч/б → знаки</string>
 
@@ -71,11 +71,17 @@
     <string name="speed_slow">медленно</string>
     <string name="speed_fast">быстрее</string>
 
-    <string name="wave_height_title">Высота волн</string>
-    <string name="wave_height_value">%1$d%%</string>
-    <string name="wave_height_low">спокойнее</string>
-    <string name="wave_height_high">выше</string>
-    <string name="wave_height_hint">Максимальный размах волн в простое, без музыки и зарядки. 100% — обычная высота.</string>
+    <string name="wave_beat_title">Биение волн</string>
+    <string name="wave_beat_value">%1$d%%</string>
+    <string name="wave_beat_low">спокойнее</string>
+    <string name="wave_beat_high">сильнее</string>
+    <string name="wave_beat_hint">Амплитуда колебаний трёх волн в простое, без музыки и зарядки. 100% — обычная. Не влияет на расстояние между лентами.</string>
+
+    <string name="wave_spread_title">Ширина между волнами</string>
+    <string name="wave_spread_value">%1$d%%</string>
+    <string name="wave_spread_low">уже</string>
+    <string name="wave_spread_high">шире</string>
+    <string name="wave_spread_hint">Расстояние между тремя лентами в середине экрана. Края остаются общей точкой; 100% — исходное. Крайние волны всегда остаются в нижних трёх четвертях.</string>
 
     <string name="real_spectrum_title">Реальный спектр</string>
     <string name="real_spectrum_detail">FFT частот текущего трека. Android запрашивает разрешение RECORD_AUDIO, но микрофон не записывается и звук не сохраняется.</string>

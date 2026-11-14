@@ -74,11 +74,18 @@ data class WallpaperSettings(
     val targetFps: Int = DEFAULT_FPS,
     val lineWidth: Float = 1f,
     /**
-     * Vertical amplitude of the idle waves, as a percentage of the original
-     * hand-tuned range. It only affects the plain WAVES state; music and the
-     * charging battery meter keep their own geometry.
+     * Vertical "beat" (oscillation amplitude) of the idle waves, as a
+     * percentage of the original hand-tuned range. It only affects the plain
+     * WAVES state; music and the charging battery meter keep their own
+     * geometry.
      */
-    val waveHeightPercent: Int = DEFAULT_WAVE_HEIGHT_PERCENT,
+    val waveBeatPercent: Int = DEFAULT_WAVE_BEAT_PERCENT,
+    /**
+     * Vertical distance between the three idle ribbons, as a percentage of
+     * the original hand-tuned offsets. The anchors at both screen edges stay
+     * shared.
+     */
+    val waveSpreadPercent: Int = DEFAULT_WAVE_SPREAD_PERCENT,
     /**
      * Opt-in real FFT visualization. It uses Android's Visualizer effect on
      * the global output mix. RECORD_AUDIO is required by the platform, but no
@@ -104,9 +111,13 @@ data class WallpaperSettings(
         backgroundColorArgb = backgroundColorArgb or ALPHA_OPAQUE,
         targetFps = if (targetFps in FPS_OPTIONS) targetFps else DEFAULT_FPS,
         lineWidth = lineWidth.coerceIn(MIN_LINE_WIDTH, MAX_LINE_WIDTH),
-        waveHeightPercent = waveHeightPercent.coerceIn(
-            MIN_WAVE_HEIGHT_PERCENT,
-            MAX_WAVE_HEIGHT_PERCENT
+        waveBeatPercent = waveBeatPercent.coerceIn(
+            MIN_WAVE_BEAT_PERCENT,
+            MAX_WAVE_BEAT_PERCENT
+        ),
+        waveSpreadPercent = waveSpreadPercent.coerceIn(
+            MIN_WAVE_SPREAD_PERCENT,
+            MAX_WAVE_SPREAD_PERCENT
         )
     )
 
@@ -117,9 +128,12 @@ data class WallpaperSettings(
         const val MAX_SPEED = 45f
         const val MIN_LINE_WIDTH = 0.5f
         const val MAX_LINE_WIDTH = 2.5f
-        const val MIN_WAVE_HEIGHT_PERCENT = 20
-        const val MAX_WAVE_HEIGHT_PERCENT = 200
-        const val DEFAULT_WAVE_HEIGHT_PERCENT = 100
+        const val MIN_WAVE_BEAT_PERCENT = 20
+        const val MAX_WAVE_BEAT_PERCENT = 200
+        const val DEFAULT_WAVE_BEAT_PERCENT = 100
+        const val MIN_WAVE_SPREAD_PERCENT = 50
+        const val MAX_WAVE_SPREAD_PERCENT = 150
+        const val DEFAULT_WAVE_SPREAD_PERCENT = 100
         const val DEFAULT_FPS = 60
 
         /** Opaque white. */
@@ -151,7 +165,10 @@ object Prefs {
     private const val KEY_LEGACY_COLOR = "ascii_color"
     private const val KEY_TARGET_FPS = "target_fps"
     private const val KEY_LINE_WIDTH = "line_width"
-    private const val KEY_WAVE_HEIGHT = "wave_height_percent"
+    // Keep the old key so the value chosen in 1.4.0 survives the rename from
+    // "wave height" to "wave beat".
+    private const val KEY_WAVE_BEAT = "wave_height_percent"
+    private const val KEY_WAVE_SPREAD = "wave_spread_percent"
     private const val KEY_REAL_SPECTRUM = "real_spectrum_enabled"
     private const val KEY_UNLOCK_ANIMATION = "unlock_animation"
     private const val KEY_PHOTO_REVISION = "photo_revision"
@@ -169,7 +186,8 @@ object Prefs {
         KEY_BACKGROUND_COLOR,
         KEY_TARGET_FPS,
         KEY_LINE_WIDTH,
-        KEY_WAVE_HEIGHT,
+        KEY_WAVE_BEAT,
+        KEY_WAVE_SPREAD,
         KEY_REAL_SPECTRUM,
         KEY_UNLOCK_ANIMATION,
         KEY_PHOTO_REVISION,
@@ -206,9 +224,13 @@ object Prefs {
             ),
             targetFps = p.getInt(KEY_TARGET_FPS, WallpaperSettings.DEFAULT_FPS),
             lineWidth = p.getFloat(KEY_LINE_WIDTH, 1f),
-            waveHeightPercent = p.getInt(
-                KEY_WAVE_HEIGHT,
-                WallpaperSettings.DEFAULT_WAVE_HEIGHT_PERCENT
+            waveBeatPercent = p.getInt(
+                KEY_WAVE_BEAT,
+                WallpaperSettings.DEFAULT_WAVE_BEAT_PERCENT
+            ),
+            waveSpreadPercent = p.getInt(
+                KEY_WAVE_SPREAD,
+                WallpaperSettings.DEFAULT_WAVE_SPREAD_PERCENT
             ),
             realSpectrumEnabled = p.getBoolean(KEY_REAL_SPECTRUM, false),
             unlockAnimationEnabled = p.getBoolean(KEY_UNLOCK_ANIMATION, true),
@@ -229,7 +251,8 @@ object Prefs {
             .putInt(KEY_BACKGROUND_COLOR, clean.backgroundColorArgb)
             .putInt(KEY_TARGET_FPS, clean.targetFps)
             .putFloat(KEY_LINE_WIDTH, clean.lineWidth)
-            .putInt(KEY_WAVE_HEIGHT, clean.waveHeightPercent)
+            .putInt(KEY_WAVE_BEAT, clean.waveBeatPercent)
+            .putInt(KEY_WAVE_SPREAD, clean.waveSpreadPercent)
             .putBoolean(KEY_REAL_SPECTRUM, clean.realSpectrumEnabled)
             .putBoolean(KEY_UNLOCK_ANIMATION, clean.unlockAnimationEnabled)
             .putInt(KEY_PHOTO_REVISION, clean.photoRevision)

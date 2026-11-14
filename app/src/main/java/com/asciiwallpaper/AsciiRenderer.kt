@@ -45,6 +45,7 @@ class AsciiRenderer(private val context: Context? = null) {
         private const val MAX_SCENE_WIDTH = 560
         private const val MAX_SCENE_HEIGHT = 1800
         private const val SAMPLES_PER_CHAR = 3
+        private const val SPECTRUM_RETRY_NANOS = 5_000_000_000L
 
         // Направления на источник света. Свет зафиксирован в мире, поэтому
         // при вращении фигуры грани естественно меняют яркость.
@@ -64,6 +65,8 @@ class AsciiRenderer(private val context: Context? = null) {
     private val audioSpectrum = AudioSpectrumSource(context)
     private val realSpectrumLevels = FloatArray(AudioSpectrumSource.BAND_COUNT)
     private var renderingActive = true
+    private var spectrumMusicActive = false
+    private var spectrumRetryAtNanos = 0L
 
     private var settings = WallpaperSettings()
     private var sceneBitmap: Bitmap? = null
@@ -252,12 +255,30 @@ class AsciiRenderer(private val context: Context? = null) {
     }
 
     private fun syncSpectrumCapture() {
-        if (renderingActive &&
+        val wantsSpectrum = renderingActive &&
             settings.style == ShapeStyle.WAVES &&
             settings.realSpectrumEnabled
-        ) {
-            audioSpectrum.start()
+        if (!wantsSpectrum) {
+            spectrumMusicActive = false
+            spectrumRetryAtNanos = 0L
+            audioSpectrum.stop()
+            return
+        }
+        // Visualizer is a native audio effect attached to the global mix.
+        // Keeping it alive while no music is playing costs CPU and can make
+        // the whole device feel janky, so it is only enabled for an active
+        // music stream. The render loop starts/stops it on music transitions.
+        if (musicSignal.isPlaying) {
+            spectrumMusicActive = true
+            if (!audioSpectrum.isAvailable) {
+                audioSpectrum.start()
+                // Give the effect time to deliver its first callback. If it
+                // never does, the next retry restarts the dead instance.
+                spectrumRetryAtNanos = System.nanoTime() + SPECTRUM_RETRY_NANOS
+            }
         } else {
+            spectrumMusicActive = false
+            spectrumRetryAtNanos = 0L
             audioSpectrum.stop()
         }
     }
@@ -360,6 +381,30 @@ class AsciiRenderer(private val context: Context? = null) {
         val waveTime = elapsedSeconds * waveSpeed
         if (settings.style == ShapeStyle.WAVES) {
             musicSignal.poll(timeNanos)
+            if (settings.realSpectrumEnabled) {
+                if (musicSignal.isPlaying) {
+                    val unhealthy = !audioSpectrum.isAvailable ||
+                        !audioSpectrum.hasRecentFft()
+                    val dueForRetry = unhealthy &&
+                        timeNanos >= spectrumRetryAtNanos
+                    if (!spectrumMusicActive || dueForRetry) {
+                        // Start only when playback actually begins. A failure
+                        // or a Visualizer that stops delivering callbacks is
+                        // retried after a pause, not on every frame.
+                        spectrumMusicActive = true
+                        if (audioSpectrum.isAvailable) {
+                            audioSpectrum.stop()
+                        }
+                        audioSpectrum.start()
+                        spectrumRetryAtNanos =
+                            timeNanos + SPECTRUM_RETRY_NANOS
+                    }
+                } else if (spectrumMusicActive) {
+                    spectrumMusicActive = false
+                    spectrumRetryAtNanos = 0L
+                    audioSpectrum.stop()
+                }
+            }
             val realSpectrum = if (settings.realSpectrumEnabled &&
                 audioSpectrum.readInto(realSpectrumLevels)
             ) {
@@ -648,7 +693,8 @@ class AsciiRenderer(private val context: Context? = null) {
                     columns = columns,
                     timeSeconds = elapsedSeconds * waveSpeed,
                     lineWidthScale = settings.lineWidth,
-                    idleAmplitudeScale = settings.waveHeightPercent / 100f
+                    idleAmplitudeScale = settings.waveBeatPercent / 100f,
+                    idleSpreadScale = settings.waveSpreadPercent / 100f
                 )
             }
 

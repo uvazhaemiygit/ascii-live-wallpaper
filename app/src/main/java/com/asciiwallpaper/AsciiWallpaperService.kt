@@ -42,7 +42,8 @@ class AsciiWallpaperService : WallpaperService() {
 
     private inner class AsciiEngine :
         Engine(),
-        SharedPreferences.OnSharedPreferenceChangeListener {
+        SharedPreferences.OnSharedPreferenceChangeListener,
+        AppUiState.Listener {
 
         private val appContext: Context = applicationContext
         private val prefs = Prefs.sharedPreferences(appContext)
@@ -87,7 +88,11 @@ class AsciiWallpaperService : WallpaperService() {
         private val frameRunnable = object : Runnable {
             override fun run() {
                 frameScheduled = false
-                if (!visible || !surfaceReady || !screenOn) return
+                if (!visible || !surfaceReady || !screenOn ||
+                    AppUiState.isSettingsVisible()
+                ) {
+                    return
+                }
 
                 renderer.setBattery(charging, batteryPercent)
                 if (!renderStarted) {
@@ -177,6 +182,7 @@ class AsciiWallpaperService : WallpaperService() {
             prefs.registerOnSharedPreferenceChangeListener(this)
             registerScreenReceiver()
             registerBatteryReceiver()
+            AppUiState.addListener(this)
             renderHandler.post {
                 renderer.setBattery(charging, batteryPercent)
                 renderer.updateSettings(settings)
@@ -271,10 +277,26 @@ class AsciiWallpaperService : WallpaperService() {
             }
         }
 
+        override fun onSettingsVisibilityChanged(visible: Boolean) {
+            if (visible) {
+                stopRendering()
+            } else {
+                startRenderingIfPossible()
+            }
+        }
+
         private fun startRenderingIfPossible(force: Boolean = false) {
-            if (!visible || !surfaceReady || !screenOn) return
+            if (!visible || !surfaceReady || !screenOn ||
+                AppUiState.isSettingsVisible()
+            ) {
+                return
+            }
             renderHandler.post {
-                if (!visible || !surfaceReady || !screenOn) return@post
+                if (!visible || !surfaceReady || !screenOn ||
+                    AppUiState.isSettingsVisible()
+                ) {
+                    return@post
+                }
                 if (pendingUnlockAnimation) {
                     pendingUnlockAnimation = false
                     performUnlockAnimationOnRenderThread()
@@ -306,7 +328,11 @@ class AsciiWallpaperService : WallpaperService() {
         }
 
         private fun scheduleNextFrame() {
-            if (!visible || !surfaceReady || !screenOn || frameScheduled) return
+            if (!visible || !surfaceReady || !screenOn || frameScheduled ||
+                AppUiState.isSettingsVisible()
+            ) {
+                return
+            }
             // Fastfetch is a readable system-info screen, not a 3D animation.
             // One quiet refresh per second keeps the clock/battery current
             // without burning the render budget at 60–120 fps. An imported
@@ -497,6 +523,7 @@ class AsciiWallpaperService : WallpaperService() {
             visible = false
             stopRendering()
             prefs.unregisterOnSharedPreferenceChangeListener(this)
+            AppUiState.removeListener(this)
             unregisterScreenReceiver()
             unregisterBatteryReceiver()
             mainHandler.removeCallbacksAndMessages(null)

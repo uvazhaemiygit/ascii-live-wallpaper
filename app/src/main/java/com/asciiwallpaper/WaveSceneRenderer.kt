@@ -4,6 +4,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.sin
 
@@ -148,7 +149,8 @@ class WaveSceneRenderer {
         columns: Int,
         timeSeconds: Float,
         lineWidthScale: Float,
-        idleAmplitudeScale: Float
+        idleAmplitudeScale: Float,
+        idleSpreadScale: Float
     ) {
         if (width <= 1 || height <= 1) return
         val cell = width.toFloat() / columns.coerceAtLeast(1)
@@ -179,22 +181,37 @@ class WaveSceneRenderer {
             canvas.drawRect(0f, fillTop, width.toFloat(), height.toFloat(), fillPaint)
         }
 
-        // The user-controlled height scales only the oscillation, not the
-        // fixed vertical offsets that keep the three idle ribbons separated.
-        // At 200% the tallest ribbon still stays inside the lower three
-        // quarters; at 20% the waves become calm without collapsing into one
-        // line.
-        val amplitudeScale = idleAmplitudeScale.coerceIn(0.2f, 2f)
-        waveAmplitudes[0] = height * (0.064f + 0.019f * bass) * amplitudeScale
-        waveAmplitudes[1] = height * (0.076f + 0.022f * treble) * amplitudeScale
-        waveAmplitudes[2] = height * (0.068f + 0.020f * bass) * amplitudeScale
+        // "Beat" scales only the oscillation; "spread" scales only the fixed
+        // vertical offsets between the three idle ribbons. Both anchors at the
+        // screen edges remain shared. If an extreme beat + spread combination
+        // would leave the lower three quarters, one common fit factor shrinks
+        // both geometry values so the ribbons never clip at the region edges.
+        val beatScale = idleAmplitudeScale.coerceIn(0.2f, 2f)
+        val spreadScale = idleSpreadScale.coerceIn(0.5f, 1.5f)
+        waveAmplitudes[0] = height * (0.064f + 0.019f * bass) * beatScale
+        waveAmplitudes[1] = height * (0.076f + 0.022f * treble) * beatScale
+        waveAmplitudes[2] = height * (0.068f + 0.020f * bass) * beatScale
+
+        val availableVertical = minOf(
+            anchorY - regionTop,
+            regionBottom - anchorY
+        )
+        var fit = 1f
+        for (layer in 0 until 3) {
+            val required = abs(waveOffsets[layer]) * height * spreadScale +
+                waveAmplitudes[layer] * 1.30f
+            if (required > availableVertical && required > 0f) {
+                fit = minOf(fit, availableVertical / required)
+            }
+        }
+        fit = fit.coerceIn(0f, 1f)
 
         val batteryY = height * (1f - batteryLevel)
         for (layer in 0 until 3) {
             wavePath.rewind()
-            val amplitude = waveAmplitudes[layer]
+            val amplitude = waveAmplitudes[layer] * fit
             val frequency = waveFrequencies[layer]
-            val offset = waveOffsets[layer] * height
+            val offset = waveOffsets[layer] * height * spreadScale * fit
             val phase = timeSeconds * (0.95f + layer * 0.18f) + layer * 1.7f
 
             for (i in 0..samples) {
