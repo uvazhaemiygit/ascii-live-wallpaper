@@ -1,13 +1,16 @@
 package com.asciiwallpaper
 
 import android.app.KeyguardManager
+import android.app.WallpaperColors
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.graphics.Canvas
+import android.graphics.Color
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -213,6 +216,27 @@ class AsciiWallpaperService : WallpaperService() {
             }
         }
 
+        /**
+         * Feeds the current wallpaper palette to Android's Wallpaper & style
+         * pipeline. On Android 12+ launchers can use these colors for themed
+         * (Material You) icons; the launcher remains in control of whether the
+         * user's themed-icon option is enabled.
+         *
+         * The selected background is the primary seed, the glyph color is the
+         * secondary accent, and the charging green is a tertiary accent. This
+         * method is only requested by the framework on API 27+.
+         */
+        override fun onComputeColors(): WallpaperColors? {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return null
+            return runCatching {
+                WallpaperColors(
+                    Color.valueOf(settings.backgroundColorArgb or OPAQUE_BLACK),
+                    Color.valueOf(settings.glyphColorArgb or OPAQUE_BLACK),
+                    Color.valueOf(CHARGING_GREEN)
+                )
+            }.getOrNull()
+        }
+
         override fun onSharedPreferenceChanged(
             sharedPreferences: SharedPreferences?,
             key: String?
@@ -223,7 +247,10 @@ class AsciiWallpaperService : WallpaperService() {
             if (updated == settings) return
 
             val targetChanged = updated.targetFps != settings.targetFps
+            val colorsChanged = updated.backgroundColorArgb != settings.backgroundColorArgb ||
+                updated.glyphColorArgb != settings.glyphColorArgb
             settings = updated
+            if (colorsChanged) notifyWallpaperColorsChanged()
             renderHandler.post {
                 renderer.setBattery(charging, batteryPercent)
                 renderer.updateSettings(updated)
@@ -232,6 +259,16 @@ class AsciiWallpaperService : WallpaperService() {
                 }
             }
             startRenderingIfPossible(force = true)
+        }
+
+        private fun notifyWallpaperColorsChanged() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return
+            try {
+                notifyColorsChanged()
+            } catch (_: Throwable) {
+                // Some launchers/OEM wallpaper services do not observe live
+                // palette changes; the next onComputeColors call still works.
+            }
         }
 
         private fun startRenderingIfPossible(force: Boolean = false) {
@@ -246,6 +283,7 @@ class AsciiWallpaperService : WallpaperService() {
                     val freshStart = !renderStarted
                     renderStarted = true
                     renderer.setBattery(charging, batteryPercent)
+                    renderer.setRenderingActive(true)
                     renderer.updateSettings(settings)
                     // Resetting the corner positions on every color or
                     // density edit would snap a running unlock animation.
@@ -308,6 +346,7 @@ class AsciiWallpaperService : WallpaperService() {
             }
             nextFrameAtMillis = 0L
             renderStarted = false
+            renderer.setRenderingActive(false)
             renderer.resetFrameClock()
         }
 
@@ -463,6 +502,7 @@ class AsciiWallpaperService : WallpaperService() {
             mainHandler.removeCallbacksAndMessages(null)
             renderHandler.post {
                 renderHandler.removeCallbacksAndMessages(null)
+                renderer.release()
                 renderThread.quitSafely()
             }
             super.onDestroy()
@@ -471,5 +511,7 @@ class AsciiWallpaperService : WallpaperService() {
 
     companion object {
         private const val TAG = "AsciiWallpaper"
+        private const val OPAQUE_BLACK = 0xFF000000.toInt()
+        private const val CHARGING_GREEN = 0xFF6DFF82.toInt()
     }
 }

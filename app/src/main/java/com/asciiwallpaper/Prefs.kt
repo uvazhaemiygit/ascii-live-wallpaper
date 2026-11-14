@@ -73,6 +73,19 @@ data class WallpaperSettings(
     val backgroundColorArgb: Int = DEFAULT_BACKGROUND_COLOR,
     val targetFps: Int = DEFAULT_FPS,
     val lineWidth: Float = 1f,
+    /**
+     * Vertical amplitude of the idle waves, as a percentage of the original
+     * hand-tuned range. It only affects the plain WAVES state; music and the
+     * charging battery meter keep their own geometry.
+     */
+    val waveHeightPercent: Int = DEFAULT_WAVE_HEIGHT_PERCENT,
+    /**
+     * Opt-in real FFT visualization. It uses Android's Visualizer effect on
+     * the global output mix. RECORD_AUDIO is required by the platform, but no
+     * microphone samples are recorded; if the permission or device support is
+     * missing the renderer keeps the procedural fallback.
+     */
+    val realSpectrumEnabled: Boolean = false,
     val unlockAnimationEnabled: Boolean = true,
     /**
      * Bumped whenever a new photo or animated media clip is imported. The
@@ -90,7 +103,11 @@ data class WallpaperSettings(
         glyphColorArgb = glyphColorArgb or ALPHA_OPAQUE,
         backgroundColorArgb = backgroundColorArgb or ALPHA_OPAQUE,
         targetFps = if (targetFps in FPS_OPTIONS) targetFps else DEFAULT_FPS,
-        lineWidth = lineWidth.coerceIn(MIN_LINE_WIDTH, MAX_LINE_WIDTH)
+        lineWidth = lineWidth.coerceIn(MIN_LINE_WIDTH, MAX_LINE_WIDTH),
+        waveHeightPercent = waveHeightPercent.coerceIn(
+            MIN_WAVE_HEIGHT_PERCENT,
+            MAX_WAVE_HEIGHT_PERCENT
+        )
     )
 
     companion object {
@@ -100,6 +117,9 @@ data class WallpaperSettings(
         const val MAX_SPEED = 45f
         const val MIN_LINE_WIDTH = 0.5f
         const val MAX_LINE_WIDTH = 2.5f
+        const val MIN_WAVE_HEIGHT_PERCENT = 20
+        const val MAX_WAVE_HEIGHT_PERCENT = 200
+        const val DEFAULT_WAVE_HEIGHT_PERCENT = 100
         const val DEFAULT_FPS = 60
 
         /** Opaque white. */
@@ -131,6 +151,8 @@ object Prefs {
     private const val KEY_LEGACY_COLOR = "ascii_color"
     private const val KEY_TARGET_FPS = "target_fps"
     private const val KEY_LINE_WIDTH = "line_width"
+    private const val KEY_WAVE_HEIGHT = "wave_height_percent"
+    private const val KEY_REAL_SPECTRUM = "real_spectrum_enabled"
     private const val KEY_UNLOCK_ANIMATION = "unlock_animation"
     private const val KEY_PHOTO_REVISION = "photo_revision"
     private const val KEY_PHOTO_FIT = "photo_fit"
@@ -147,6 +169,8 @@ object Prefs {
         KEY_BACKGROUND_COLOR,
         KEY_TARGET_FPS,
         KEY_LINE_WIDTH,
+        KEY_WAVE_HEIGHT,
+        KEY_REAL_SPECTRUM,
         KEY_UNLOCK_ANIMATION,
         KEY_PHOTO_REVISION,
         KEY_PHOTO_FIT,
@@ -182,6 +206,11 @@ object Prefs {
             ),
             targetFps = p.getInt(KEY_TARGET_FPS, WallpaperSettings.DEFAULT_FPS),
             lineWidth = p.getFloat(KEY_LINE_WIDTH, 1f),
+            waveHeightPercent = p.getInt(
+                KEY_WAVE_HEIGHT,
+                WallpaperSettings.DEFAULT_WAVE_HEIGHT_PERCENT
+            ),
+            realSpectrumEnabled = p.getBoolean(KEY_REAL_SPECTRUM, false),
             unlockAnimationEnabled = p.getBoolean(KEY_UNLOCK_ANIMATION, true),
             photoRevision = p.getInt(KEY_PHOTO_REVISION, 0),
             photoFit = PhotoFit.fromValue(p.getString(KEY_PHOTO_FIT, null)),
@@ -200,6 +229,8 @@ object Prefs {
             .putInt(KEY_BACKGROUND_COLOR, clean.backgroundColorArgb)
             .putInt(KEY_TARGET_FPS, clean.targetFps)
             .putFloat(KEY_LINE_WIDTH, clean.lineWidth)
+            .putInt(KEY_WAVE_HEIGHT, clean.waveHeightPercent)
+            .putBoolean(KEY_REAL_SPECTRUM, clean.realSpectrumEnabled)
             .putBoolean(KEY_UNLOCK_ANIMATION, clean.unlockAnimationEnabled)
             .putInt(KEY_PHOTO_REVISION, clean.photoRevision)
             .putString(KEY_PHOTO_FIT, clean.photoFit.prefValue)

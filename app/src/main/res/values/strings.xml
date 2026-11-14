@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">ASCII Live Wallpaper</string>
     <string name="settings_title">ASCII-обои</string>
-    <string name="settings_subtitle">Восемь сцен, фото, GIF и видео: ASCII-арт, точечная матрица Nothing, fastfetch, ASCII-логотип Android и волны, которые собираются под музыку телефона. Свои цвета, без сети.</string>
+    <string name="settings_subtitle">Восемь сцен, фото, GIF и видео: ASCII-арт, точечная матрица Nothing, fastfetch, ASCII-логотип Android и волны под музыку телефона с настраиваемой высотой. Свои цвета и палитра для «Обои и стиль», без сети.</string>
 
     <string name="preview_title">ПРЕДПРОСМОТР / В РЕАЛЬНОМ ВРЕМЕНИ</string>
     <string name="preview_live">LIVE</string>
@@ -26,7 +26,7 @@
     <string name="style_android_logo">Android</string>
     <string name="style_android_logo_detail">Тот же ASCII-логотип Android, крупным планом</string>
     <string name="style_waves">Волны / музыка</string>
-    <string name="style_waves_detail">Три волны, уровень заряда и слияние в эквалайзер под музыку</string>
+    <string name="style_waves_detail">Три волны, настраиваемая высота, уровень заряда и эквалайзер под музыку</string>
     <string name="style_photo">Моё фото / видео</string>
     <string name="style_photo_detail">Фото, GIF или видео · цвет → ч/б → знаки</string>
 
@@ -71,6 +71,18 @@
     <string name="speed_slow">медленно</string>
     <string name="speed_fast">быстрее</string>
 
+    <string name="wave_height_title">Высота волн</string>
+    <string name="wave_height_value">%1$d%%</string>
+    <string name="wave_height_low">спокойнее</string>
+    <string name="wave_height_high">выше</string>
+    <string name="wave_height_hint">Максимальный размах волн в простое, без музыки и зарядки. 100% — обычная высота.</string>
+
+    <string name="real_spectrum_title">Реальный спектр</string>
+    <string name="real_spectrum_detail">FFT частот текущего трека. Android запрашивает разрешение RECORD_AUDIO, но микрофон не записывается и звук не сохраняется.</string>
+    <string name="real_spectrum_denied">Разрешение не выдано — остаётся процедурная анимация.</string>
+    <string name="real_spectrum_fallback">На части прошивок системный аудиомикшер закрыт; тогда автоматически работает резервная анимация.</string>
+    <string name="real_spectrum_toggle_description">Включить или выключить реальный частотный спектр</string>
+
     <string name="fps_title">Частота кадров</string>
     <string name="fps_value">%1$d FPS</string>
     <string name="fps_hint">Ограничение плавности и расхода батареи. 60 FPS — универсальный баланс.</string>
@@ -93,6 +105,7 @@
     <string name="glyph_color_title">Цвет символов</string>
     <string name="background_color_title">Цвет фона</string>
     <string name="color_custom_hint">Откройте палитру, чтобы выбрать любой оттенок, насыщенность и яркость. По умолчанию: белые символы на чёрном фоне.</string>
+    <string name="color_system_hint">Цвет фона и акцента передаётся системному приложению «Обои и стиль». На Android 12+ совместимый лаунчер может использовать его для тематических иконок Material You, если эта функция включена в системе.</string>
     <string name="color_palette">Палитра</string>
     <string name="color_picker_hint">Настройте оттенок, насыщенность и яркость.</string>
     <string name="color_preview">ПРЕДПРОСМОТР ЦВЕТА</string>
@@ -114,6 +127,6 @@
     <string name="settings_live_note">Настройки применяются без перезапуска обоев.</string>
     <string name="wallpaper_picker_missing">Не удалось открыть выбор живых обоев на этом устройстве.</string>
 
-    <string name="wallpaper_description">Восемь сцен: 3D-фигуры, fastfetch, ASCII-логотип Android, волны под музыку и фото/GIF/видео. ASCII-символы или точечная матрица Nothing с настраиваемым цветом.</string>
+    <string name="wallpaper_description">Восемь сцен: 3D-фигуры, fastfetch, ASCII-логотип Android, волны под музыку с реальным спектром по желанию и фото/GIF/видео. ASCII-символы или точки Nothing, настраиваемые цвета и палитра для Material You.</string>
     <string name="wallpaper_author">ASCII Live Wallpaper</string>
 </resources>

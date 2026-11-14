@@ -1,5 +1,8 @@
 package com.asciiwallpaper
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -49,6 +52,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -80,7 +84,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
@@ -202,6 +208,13 @@ fun SettingsScreen(
     }
     var columns by rememberSaveable { mutableStateOf(initialSettings.columns.toFloat()) }
     var speed by rememberSaveable { mutableStateOf(initialSettings.speedDegPerSec) }
+    var waveHeight by rememberSaveable {
+        mutableIntStateOf(initialSettings.waveHeightPercent)
+    }
+    var realSpectrum by rememberSaveable {
+        mutableStateOf(initialSettings.realSpectrumEnabled)
+    }
+    var spectrumDenied by rememberSaveable { mutableStateOf(false) }
     var targetFps by rememberSaveable { mutableIntStateOf(initialSettings.targetFps) }
     var lineWidth by rememberSaveable { mutableStateOf(initialSettings.lineWidth) }
     var unlockAnimationEnabled by rememberSaveable {
@@ -212,6 +225,9 @@ fun SettingsScreen(
     }
     val context = LocalContext.current
     val appContext = context.applicationContext
+    var audioPermissionGranted by remember {
+        mutableStateOf(hasAudioPermission(appContext))
+    }
     var photoRevision by rememberSaveable {
         mutableIntStateOf(initialSettings.photoRevision)
     }
@@ -241,6 +257,8 @@ fun SettingsScreen(
         backgroundColorArgb = backgroundColorValue,
         targetFps = targetFps,
         lineWidth = lineWidth,
+        waveHeightPercent = waveHeight,
+        realSpectrumEnabled = realSpectrum,
         unlockAnimationEnabled = unlockAnimationEnabled,
         photoRevision = photoRevision,
         photoFit = photoFit,
@@ -291,6 +309,39 @@ fun SettingsScreen(
                 showPhotoFitSheet = true
             }
         }
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        audioPermissionGranted = granted
+        realSpectrum = granted
+        spectrumDenied = !granted
+        commit(currentSettings.copy(realSpectrumEnabled = granted))
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, appContext, realSpectrum) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val granted = hasAudioPermission(appContext)
+                audioPermissionGranted = granted
+                if (!granted && realSpectrum) {
+                    // The permission can be revoked from system settings while
+                    // the feature is enabled. Keep the stored setting truthful
+                    // so the wallpaper does not keep trying to start capture.
+                    realSpectrum = false
+                    spectrumDenied = true
+                    onSettingsChanged(
+                        Prefs.load(appContext)
+                            .copy(realSpectrumEnabled = false)
+                            .sanitized()
+                    )
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     fun selectStyle(newStyle: ShapeStyle) {
@@ -534,6 +585,72 @@ fun SettingsScreen(
                             start = stringResource(R.string.speed_slow),
                             end = stringResource(R.string.speed_fast)
                         )
+                        if (style == ShapeStyle.WAVES) {
+                            Spacer(Modifier.height(16.dp))
+                            LabelWithValue(
+                                title = stringResource(R.string.wave_height_title),
+                                value = stringResource(
+                                    R.string.wave_height_value,
+                                    waveHeight
+                                )
+                            )
+                            Slider(
+                                value = waveHeight.toFloat(),
+                                onValueChange = { waveHeight = it.roundToInt() },
+                                onValueChangeFinished = {
+                                    commit(currentSettings.copy(
+                                        waveHeightPercent = waveHeight
+                                    ))
+                                },
+                                valueRange =
+                                    WallpaperSettings.MIN_WAVE_HEIGHT_PERCENT.toFloat()..
+                                        WallpaperSettings.MAX_WAVE_HEIGHT_PERCENT.toFloat(),
+                                steps = 35,
+                                colors = asciiSliderColors()
+                            )
+                            SliderLimits(
+                                start = stringResource(R.string.wave_height_low),
+                                end = stringResource(R.string.wave_height_high)
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = stringResource(R.string.wave_height_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextMuted
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            RealSpectrumRow(
+                                checked = realSpectrum && audioPermissionGranted,
+                                permissionDenied = spectrumDenied,
+                                onToggle = { enabled ->
+                                    when {
+                                        !enabled -> {
+                                            realSpectrum = false
+                                            spectrumDenied = false
+                                            commit(
+                                                currentSettings.copy(
+                                                    realSpectrumEnabled = false
+                                                )
+                                            )
+                                        }
+
+                                        audioPermissionGranted -> {
+                                            realSpectrum = true
+                                            spectrumDenied = false
+                                            commit(
+                                                currentSettings.copy(
+                                                    realSpectrumEnabled = true
+                                                )
+                                            )
+                                        }
+
+                                        else -> audioPermissionLauncher.launch(
+                                            Manifest.permission.RECORD_AUDIO
+                                        )
+                                    }
+                                }
+                            )
+                        }
                         Spacer(Modifier.height(16.dp))
                         LabelWithValue(
                             title = stringResource(R.string.fps_title),
@@ -667,6 +784,12 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = TextMuted
                     )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.color_system_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMuted
+                    )
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -710,7 +833,7 @@ fun SettingsScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "ASCII LIVE WALLPAPER  /  v1.3.0",
+                    text = "ASCII LIVE WALLPAPER  /  v1.4.0",
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted.copy(alpha = 0.55f),
@@ -1102,6 +1225,9 @@ private fun LiveAsciiPreview(
     val renderer = remember(context) {
         AsciiRenderer(context.applicationContext)
     }
+    DisposableEffect(renderer) {
+        onDispose { renderer.release() }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     var frameTimeNanos by remember { mutableLongStateOf(System.nanoTime()) }
 
@@ -1161,6 +1287,10 @@ private fun LiveAsciiPreview(
         }
     }
 }
+
+private fun hasAudioPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+        PackageManager.PERMISSION_GRANTED
 
 @Composable
 private fun SettingsCard(content: @Composable () -> Unit) {
@@ -1743,6 +1873,59 @@ private fun FpsChoice(
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace,
             color = if (selected) AccentGreen else TextMuted
+        )
+    }
+}
+
+@Composable
+private fun RealSpectrumRow(
+    checked: Boolean,
+    permissionDenied: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    val toggleDescription = stringResource(R.string.real_spectrum_toggle_description)
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.real_spectrum_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (checked) TextPrimary else TextMuted
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource(R.string.real_spectrum_detail),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Switch(
+                checked = checked,
+                onCheckedChange = onToggle,
+                modifier = Modifier.semantics {
+                    contentDescription = toggleDescription
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = AppBackground,
+                    checkedTrackColor = AccentGreenStrong,
+                    uncheckedThumbColor = TextMuted,
+                    uncheckedTrackColor = Color(0xFF263A2B),
+                    uncheckedBorderColor = PanelBorder
+                )
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = stringResource(
+                if (permissionDenied) {
+                    R.string.real_spectrum_denied
+                } else {
+                    R.string.real_spectrum_fallback
+                }
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (permissionDenied) Amber else TextMuted
         )
     }
 }

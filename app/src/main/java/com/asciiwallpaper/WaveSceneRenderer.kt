@@ -19,9 +19,10 @@ import kotlin.math.sin
  *    height is the battery percentage (top = 100%, bottom = 0%). Everything
  *    below the line is filled green while the state fades in/out.
  *
- * Android does not let an ordinary wallpaper read another app's audio stream.
- * [MusicSignal] only detects an active music stream and its volume; the band
- * motion below is generated procedurally, not captured from a microphone.
+ * [MusicSignal] detects an active music stream and its volume without a
+ * permission. When the user enables [AudioSpectrumSource], real FFT levels are
+ * supplied instead; otherwise the band motion is generated procedurally. The
+ * microphone is never opened.
  */
 class WaveSceneRenderer {
     companion object {
@@ -76,7 +77,8 @@ class WaveSceneRenderer {
         batteryPercent: Int,
         musicActive: Boolean,
         musicVolume: Float,
-        timeSeconds: Float
+        timeSeconds: Float,
+        realSpectrum: FloatArray? = null
     ) {
         batteryTarget = (batteryPercent.coerceIn(0, 100) / 100f)
         val levelSpeed = if (batteryLevel < batteryTarget) 3.2f else 2.0f
@@ -101,25 +103,30 @@ class WaveSceneRenderer {
             0f
         }
         // A deterministic mix of slow and fast oscillators gives the bands a
-        // musical-looking attack/decay without permissions or random state.
+        // musical-looking attack/decay when real FFT data is unavailable.
         val beatPhase = (timeSeconds * 1.85f) % 1f
         val kick = exp(-beatPhase * 7.0f)
+        val real = realSpectrum
+        val volumeGain = (0.58f + 0.42f * musicVolume.coerceIn(0f, 1f))
         for (band in 0 until BAND_COUNT) {
-            val target = if (energy == 0f) {
-                0f
-            } else {
-                val phase = band * 1.371f
-                val slow = 0.5f + 0.5f * sin(
-                    timeSeconds * (1.20f + band * 0.19f) + phase
-                )
-                val fast = 0.5f + 0.5f * sin(
-                    timeSeconds * (2.65f - band * 0.082f) + phase * 1.73f
-                )
-                val texture = slow * 0.56f + fast * 0.44f
-                val bassBias = 1f - band / (BAND_COUNT + 2f)
-                val beat = kick * (0.30f + bassBias * 0.55f)
-                (energy * (0.10f + 0.66f * texture + 0.24f * beat))
-                    .coerceIn(0f, 1f)
+            val target = when {
+                energy == 0f -> 0f
+                real != null && band < real.size -> (real[band].coerceIn(0f, 1f) *
+                    volumeGain).coerceIn(0f, 1f)
+                else -> {
+                    val phase = band * 1.371f
+                    val slow = 0.5f + 0.5f * sin(
+                        timeSeconds * (1.20f + band * 0.19f) + phase
+                    )
+                    val fast = 0.5f + 0.5f * sin(
+                        timeSeconds * (2.65f - band * 0.082f) + phase * 1.73f
+                    )
+                    val texture = slow * 0.56f + fast * 0.44f
+                    val bassBias = 1f - band / (BAND_COUNT + 2f)
+                    val beat = kick * (0.30f + bassBias * 0.55f)
+                    (energy * (0.10f + 0.66f * texture + 0.24f * beat))
+                        .coerceIn(0f, 1f)
+                }
             }
             val current = smoothedLevels[band]
             val attack = if (target > current) 16f else 5.5f
@@ -140,7 +147,8 @@ class WaveSceneRenderer {
         height: Int,
         columns: Int,
         timeSeconds: Float,
-        lineWidthScale: Float
+        lineWidthScale: Float,
+        idleAmplitudeScale: Float
     ) {
         if (width <= 1 || height <= 1) return
         val cell = width.toFloat() / columns.coerceAtLeast(1)
@@ -171,9 +179,15 @@ class WaveSceneRenderer {
             canvas.drawRect(0f, fillTop, width.toFloat(), height.toFloat(), fillPaint)
         }
 
-        waveAmplitudes[0] = height * (0.064f + 0.019f * bass)
-        waveAmplitudes[1] = height * (0.076f + 0.022f * treble)
-        waveAmplitudes[2] = height * (0.068f + 0.020f * bass)
+        // The user-controlled height scales only the oscillation, not the
+        // fixed vertical offsets that keep the three idle ribbons separated.
+        // At 200% the tallest ribbon still stays inside the lower three
+        // quarters; at 20% the waves become calm without collapsing into one
+        // line.
+        val amplitudeScale = idleAmplitudeScale.coerceIn(0.2f, 2f)
+        waveAmplitudes[0] = height * (0.064f + 0.019f * bass) * amplitudeScale
+        waveAmplitudes[1] = height * (0.076f + 0.022f * treble) * amplitudeScale
+        waveAmplitudes[2] = height * (0.068f + 0.020f * bass) * amplitudeScale
 
         val batteryY = height * (1f - batteryLevel)
         for (layer in 0 until 3) {

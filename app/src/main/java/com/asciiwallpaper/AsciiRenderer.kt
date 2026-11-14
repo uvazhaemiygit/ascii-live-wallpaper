@@ -61,6 +61,9 @@ class AsciiRenderer(private val context: Context? = null) {
     private val fastfetchRenderer = FastfetchRenderer(context)
     private val androidLogoRenderer = AndroidLogoRenderer(context)
     private val musicSignal = MusicSignal(context)
+    private val audioSpectrum = AudioSpectrumSource(context)
+    private val realSpectrumLevels = FloatArray(AudioSpectrumSource.BAND_COUNT)
+    private var renderingActive = true
 
     private var settings = WallpaperSettings()
     private var sceneBitmap: Bitmap? = null
@@ -210,6 +213,7 @@ class AsciiRenderer(private val context: Context? = null) {
             }
         }
         settings = clean
+        syncSpectrumCapture()
 
         if (revisionChanged) {
             mediaFrameSet = context?.let {
@@ -231,6 +235,31 @@ class AsciiRenderer(private val context: Context? = null) {
     fun setBattery(valueCharging: Boolean, percent: Int) {
         charging = valueCharging
         batteryPercent = percent.coerceIn(0, 100)
+    }
+
+    /**
+     * The wallpaper pauses capture when it is hidden or the screen turns off,
+     * and restarts it on the next visible frame. The settings preview leaves
+     * this at true for its lifetime.
+     */
+    fun setRenderingActive(active: Boolean) {
+        renderingActive = active
+        syncSpectrumCapture()
+    }
+
+    fun release() {
+        audioSpectrum.stop()
+    }
+
+    private fun syncSpectrumCapture() {
+        if (renderingActive &&
+            settings.style == ShapeStyle.WAVES &&
+            settings.realSpectrumEnabled
+        ) {
+            audioSpectrum.start()
+        } else {
+            audioSpectrum.stop()
+        }
     }
 
     fun hasAnimatedMedia(): Boolean = mediaFrameSet != null
@@ -331,13 +360,21 @@ class AsciiRenderer(private val context: Context? = null) {
         val waveTime = elapsedSeconds * waveSpeed
         if (settings.style == ShapeStyle.WAVES) {
             musicSignal.poll(timeNanos)
+            val realSpectrum = if (settings.realSpectrumEnabled &&
+                audioSpectrum.readInto(realSpectrumLevels)
+            ) {
+                realSpectrumLevels
+            } else {
+                null
+            }
             waveScene.advance(
                 dt = dt,
                 charging = charging,
                 batteryPercent = batteryPercent,
                 musicActive = musicSignal.isPlaying,
                 musicVolume = musicSignal.volume,
-                timeSeconds = waveTime
+                timeSeconds = waveTime,
+                realSpectrum = realSpectrum
             )
         }
 
@@ -610,7 +647,8 @@ class AsciiRenderer(private val context: Context? = null) {
                     height = height,
                     columns = columns,
                     timeSeconds = elapsedSeconds * waveSpeed,
-                    lineWidthScale = settings.lineWidth
+                    lineWidthScale = settings.lineWidth,
+                    idleAmplitudeScale = settings.waveHeightPercent / 100f
                 )
             }
 

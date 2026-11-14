@@ -1,6 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        The optional real spectrum uses Android's Visualizer effect, not an
+        AudioRecord or microphone capture. The platform additionally requires
+        RECORD_AUDIO for any visualizer, and MODIFY_AUDIO_SETTINGS for the
+        global output mix. The user grants RECORD_AUDIO only after enabling the
+        opt-in switch in the WAVES settings; without it the procedural fallback
+        is used.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Playback visualization does not need microphone hardware. -->
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
     <uses-feature
         android:name="android.software.live_wallpaper"
         android:required="true" />
