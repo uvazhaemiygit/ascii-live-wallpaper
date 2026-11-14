@@ -11,8 +11,8 @@ android {
         applicationId = "com.asciiwallpaper"
         minSdk = 24
         targetSdk = 34
-        versionCode = 9
-        versionName = "1.2.5"
+        versionCode = 10
+        versionName = "1.3.0"
     }
 
     buildTypes {

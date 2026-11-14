@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">ASCII Live Wallpaper</string>
     <string name="settings_title">ASCII-обои</string>
-    <string name="settings_subtitle">Пять 3D-сцен и ваше фото: ASCII-символы или точечная матрица Nothing. Свои цвета знаков и фона, живая графика без сети.</string>
+    <string name="settings_subtitle">Восемь сцен, фото, GIF и видео: ASCII-арт, точечная матрица Nothing, fastfetch, вращающийся Android и волны под музыку. Свои цвета, без сети.</string>
 
     <string name="preview_title">ПРЕДПРОСМОТР / В РЕАЛЬНОМ ВРЕМЕНИ</string>
     <string name="preview_live">LIVE</string>
@@ -21,30 +21,36 @@
     <string name="style_dna_detail">Двойная спираль · бесконечная диагональ</string>
     <string name="style_black_hole">Чёрная дыра</string>
     <string name="style_black_hole_detail">Аккреционный диск · фотонное кольцо</string>
-    <string name="style_photo">Моё фото</string>
-    <string name="style_photo_detail">Ваша картинка · цвет → ч/б → знаки</string>
+    <string name="style_fastfetch">Fastfetch</string>
+    <string name="style_fastfetch_detail">ASCII-робот и характеристики устройства — читаемым текстом</string>
+    <string name="style_android_logo">Android 3D</string>
+    <string name="style_android_logo_detail">Целый робот Android вращается по горизонтали</string>
+    <string name="style_waves">Волны / музыка</string>
+    <string name="style_waves_detail">Три волны, дуга при зарядке и 12-полосный эквалайзер</string>
+    <string name="style_photo">Моё фото / видео</string>
+    <string name="style_photo_detail">Фото, GIF или видео · цвет → ч/б → знаки</string>
 
-    <string name="section_photo">02 / ФОТО</string>
-    <string name="photo_title">Картинка для рендера</string>
-    <string name="photo_ready">Фото загружено и применено.</string>
-    <string name="photo_missing">Фото ещё не выбрано.</string>
-    <string name="photo_processing">Обрабатываю картинку…</string>
+    <string name="section_photo">02 / МЕДИА</string>
+    <string name="photo_title">Фото, GIF или видео</string>
+    <string name="photo_ready">Медиа загружено и применено.</string>
+    <string name="photo_missing">Фото или видео ещё не выбрано.</string>
+    <string name="photo_processing">Обрабатываю медиа… Видео может занять несколько секунд.</string>
     <string name="photo_processing_button">Обработка…</string>
-    <string name="photo_error">Не удалось обработать это изображение. Попробуйте другое.</string>
-    <string name="photo_pick">Выбрать фото</string>
-    <string name="photo_replace">Заменить фото</string>
-    <string name="photo_hint">Откроется системный выбор изображения. Картинка станет чёрно-белой и будет собрана из символов или точек — стиль и цвета выбираются ниже.</string>
-    <string name="photo_preview_missing">ВЫБЕРИТЕ ФОТО</string>
+    <string name="photo_error">Не удалось обработать этот файл. Попробуйте фото, GIF или короткое видео.</string>
+    <string name="photo_pick">Выбрать фото / GIF / видео</string>
+    <string name="photo_replace">Заменить медиа</string>
+    <string name="photo_hint">Откроется системный выбор. Фото станет чёрно-белым; GIF и видео будут покадрово пересобраны из символов или точек. Короткий ролик до 6 секунд.</string>
+    <string name="photo_preview_missing">ВЫБЕРИТЕ МЕДИА</string>
     <string name="photo_preview_busy">ОБРАБОТКА…</string>
 
     <string name="photo_fit_sheet_label">РАЗМЕР ФОТО</string>
-    <string name="photo_fit_sheet_title">Как показать фото?</string>
-    <string name="photo_fit_sheet_hint">Выберите, как вписать картинку в экран. Позже это можно изменить в разделе «Фото».</string>
+    <string name="photo_fit_sheet_title">Как показать медиа?</string>
+    <string name="photo_fit_sheet_hint">Выберите, как вписать изображение или видео в экран. Позже это можно изменить в разделе «Медиа».</string>
     <string name="photo_fit_contain_title">Оставить текущий размер</string>
-    <string name="photo_fit_contain_detail">Фото целиком, без обрезки. По краям могут остаться поля.</string>
+    <string name="photo_fit_contain_detail">Изображение целиком, без обрезки. По краям могут остаться поля.</string>
     <string name="photo_fit_cover_title">Растянуть на весь экран</string>
     <string name="photo_fit_cover_detail">Заполнит экран без искажения; лишние края обрежутся.</string>
-    <string name="photo_fit_row_title">Размер фото</string>
+    <string name="photo_fit_row_title">Размер медиа</string>
     <string name="photo_fit_row_contain">Текущий размер</string>
     <string name="photo_fit_row_cover">На весь экран</string>
     <string name="photo_fit_current">Сейчас: %1$s</string>
@@ -99,8 +105,17 @@
     <string name="color_cancel">Отмена</string>
     <string name="color_apply">Готово</string>
 
+    <string name="audio_reactive_title">Реакция на музыку</string>
+    <string name="audio_reactive_detail">12-полосный эквалайзер из микрофона. Включайте вручную: приложению понадобится доступ к микрофону. Если система не разрешит захват, волны останутся в обычном режиме.</string>
+    <string name="audio_reactive_toggle">Реагировать на музыку</string>
+    <string name="audio_permission_denied">Без доступа к микрофону эквалайзер не сможет реагировать на музыку.</string>
+    <string name="section_performance">ПРОИЗВОДИТЕЛЬНОСТЬ</string>
+    <string name="adaptive_performance_title">Адаптивная плотность</string>
+    <string name="adaptive_performance_detail">Если кадр не успевает, обои временно уменьшают число знаков и возвращают полную детализацию, когда устройство снова успевает. Это не меняет ваш ползунок плотности.</string>
+    <string name="adaptive_performance_toggle">Автоматически снижать нагрузку</string>
+
     <string name="unlock_title">Своя анимация на разблокировку</string>
-    <string name="unlock_detail">Макароны и кубы меняются местами, большой куб и ДНК на полсекунды раскручиваются, а чёрная дыра выпускает гравитационный импульс.</string>
+    <string name="unlock_detail">Макароны и кубы меняются местами, большой куб, ДНК и Android-робот на полсекунды раскручиваются, а чёрная дыра выпускает гравитационный импульс.</string>
     <string name="unlock_toggle_description">Включить или выключить анимацию на разблокировку</string>
 
     <string name="install_wallpaper">Установить обои</string>
@@ -108,6 +123,6 @@
     <string name="settings_live_note">Настройки применяются без перезапуска обоев.</string>
     <string name="wallpaper_picker_missing">Не удалось открыть выбор живых обоев на этом устройстве.</string>
 
-    <string name="wallpaper_description">Пять вращающихся 3D-сцен и режим «Моё фото»: ASCII-символы или точечная матрица Nothing с настраиваемым цветом знаков и фона.</string>
+    <string name="wallpaper_description">Восемь сцен: 3D-фигуры, fastfetch, вращающийся Android, волны под музыку и фото/GIF/видео. ASCII-символы или точечная матрица Nothing с настраиваемым цветом.</string>
     <string name="wallpaper_author">ASCII Live Wallpaper</string>
 </resources>

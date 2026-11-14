@@ -1,12 +1,15 @@
 package com.asciiwallpaper
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.os.BatteryManager
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -54,12 +57,44 @@ class AsciiRenderer(private val context: Context? = null) {
     private val cubeMesh = CubeMesh.create()
     private val dnaScene = DnaSceneRenderer()
     private val blackHoleScene = BlackHoleSceneRenderer()
+    private val waveScene = WaveSceneRenderer()
+    private val fastfetchRenderer = FastfetchRenderer(context)
+    private val robotMesh = RobotMesh.create()
 
     private var settings = WallpaperSettings()
     private var sceneBitmap: Bitmap? = null
     private var sceneCanvas: Canvas? = null
     private var sceneWidth = 0
     private var sceneHeight = 0
+    private var robotAngle = 18f
+    private var charging = false
+    private val audioLevels = FloatArray(12)
+    private var mediaFrameSet: MediaAsciiStore.FrameSet? = null
+
+    // Adaptive quality is intentionally local to the renderer. The user's
+    // density preference is never changed; only this session's glyph count
+    // follows the measured frame budget.
+    private var adaptiveColumns = 0
+    private var adaptiveEmaNanos = 0f
+    private var adaptiveCooldown = 0
+
+    init {
+        charging = context?.let { ctx ->
+            try {
+                val battery = ctx.registerReceiver(
+                    null,
+                    IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+                )
+                val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                val plugged = battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+                status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    status == BatteryManager.BATTERY_STATUS_FULL ||
+                    plugged != 0
+            } catch (_: Throwable) {
+                false
+            }
+        } ?: false
+    }
 
     private var lastFrameNanos = 0L
     private var elapsedSeconds = 0f
@@ -104,7 +139,6 @@ class AsciiRenderer(private val context: Context? = null) {
     // Photo source and scene-side drawing buffers. The bitmap itself is owned
     // by PhotoAsciiStore's process-wide cache, so it is never recycled here.
     private var photoBitmap: Bitmap? = null
-    private var photoRevision = Int.MIN_VALUE
     private val photoPaint = Paint().apply {
         isAntiAlias = true
         isFilterBitmap = true
@@ -147,27 +181,75 @@ class AsciiRenderer(private val context: Context? = null) {
     private var faceColors = IntArray(0)
 
     fun updateSettings(newSettings: WallpaperSettings) {
+        if (newSettings === settings) return
         val clean = newSettings.sanitized()
-        val previousStyle = settings.style
-        if (clean.style != previousStyle) {
+        val styleChanged = clean.style != settings.style
+        val columnsChanged = clean.columns != settings.columns
+        val revisionChanged = clean.photoRevision != settings.photoRevision
+
+        if (styleChanged) {
             unlockEffectStyle = null
             unlockEffectStartNanos = 0L
 
             // Если пользователь возвращается к парным фигурам, сразу ставим
             // их в сохранённые углы, а не в позиции от старой сцены.
-            if (clean.style.usesCornerSwap && !previousStyle.usesCornerSwap) {
+            if (clean.style.usesCornerSwap && !settings.style.usesCornerSwap) {
                 setCornerPhase(cornerPhase)
             }
+            if (clean.style == ShapeStyle.WAVES) {
+                // The waveform advances even while another style is visible.
+                // Without this reset a charger connected earlier would have
+                // already decayed its green flash and the arc would appear
+                // without the requested fade.
+                waveScene.onShown(charging)
+            }
+        }
+        if (styleChanged || columnsChanged) {
+            adaptiveColumns = clean.columns
+            adaptiveEmaNanos = 0f
+            adaptiveCooldown = 0
         }
         settings = clean
 
-        if (clean.style == ShapeStyle.PHOTO && clean.photoRevision != photoRevision) {
-            photoRevision = clean.photoRevision
-            photoBitmap = context?.let {
-                PhotoAsciiStore.load(it, clean.photoRevision)
+        if (revisionChanged) {
+            mediaFrameSet = context?.let {
+                MediaAsciiStore.load(it, clean.photoRevision)
+            }
+            photoBitmap = if (mediaFrameSet == null) {
+                context?.let { PhotoAsciiStore.load(it, clean.photoRevision) }
+            } else {
+                null
             }
         }
     }
+
+    /**
+     * Called by the wallpaper service from the battery receiver. The preview
+     * reads the sticky battery state once at construction and is also allowed
+     * to set it explicitly.
+     */
+    fun setCharging(value: Boolean) {
+        charging = value
+    }
+
+    fun setAudioLevels(levels: FloatArray?) {
+        if (levels == null || levels.size < audioLevels.size) {
+            audioLevels.fill(0f)
+            return
+        }
+        for (i in audioLevels.indices) {
+            audioLevels[i] = levels[i].coerceIn(0f, 1f)
+        }
+    }
+
+    fun hasAnimatedMedia(): Boolean = mediaFrameSet != null
+
+    /** Playback rate of the imported clip, clamped to a sane range. */
+    fun animatedFrameRate(): Int =
+        mediaFrameSet?.fps?.roundToInt()?.coerceIn(1, 30) ?: 12
+
+    fun needsContinuousRendering(): Boolean =
+        settings.style != ShapeStyle.PHOTO || mediaFrameSet != null
 
     /**
      * Немедленно устанавливает расстановку (например, при старте обоев,
@@ -235,8 +317,10 @@ class AsciiRenderer(private val context: Context? = null) {
     ) {
         if (width <= 1 || height <= 1) return
 
-        val cleanSettings = newSettings.sanitized()
-        updateSettings(cleanSettings)
+        updateSettings(newSettings)
+        // Load/import work must not be mistaken for the cost of a normal
+        // frame; adaptive quality should react to drawing, not disk I/O.
+        val started = System.nanoTime()
 
         val dt = if (lastFrameNanos == 0L) {
             0f
@@ -250,24 +334,142 @@ class AsciiRenderer(private val context: Context? = null) {
 
         advanceRotation(dt, timeNanos)
         updateCornerAnimation(timeNanos)
-        ensureScene(width, height)
+        waveScene.advance(dt, charging, audioLevels)
+
+        if (settings.style == ShapeStyle.FASTFETCH) {
+            fastfetchRenderer.draw(
+                canvas = canvas,
+                width = width,
+                height = height,
+                columns = settings.columns,
+                glyphColorArgb = settings.glyphColorArgb,
+                backgroundColorArgb = settings.backgroundColorArgb,
+                symbolStyle = settings.symbolStyle,
+                charging = charging
+            )
+            updateAdaptiveColumns(started)
+            return
+        }
+
+        if (settings.style == ShapeStyle.PHOTO && mediaFrameSet != null) {
+            val frameSet = mediaFrameSet ?: return
+            val frameIndex = ((elapsedSeconds * frameSet.fps).toInt() %
+                frameSet.frames.size.coerceAtLeast(1))
+            asciiFilter.drawGray(
+                canvas = canvas,
+                pixels = frameSet.frames[frameIndex],
+                sourceWidth = frameSet.width,
+                sourceHeight = frameSet.height,
+                viewWidth = width,
+                viewHeight = height,
+                requestedColumns = renderColumns(),
+                glyphColorArgb = settings.glyphColorArgb,
+                backgroundColorArgb = settings.backgroundColorArgb,
+                fit = settings.photoFit,
+                symbolStyle = settings.symbolStyle
+            )
+            updateAdaptiveColumns(started)
+            return
+        }
+
+        val columns = renderColumns()
+        ensureScene(width, height, columns)
 
         val bitmap = sceneBitmap ?: return
         val scene = sceneCanvas ?: return
         scene.drawColor(Color.BLACK)
-        drawObjects(scene, sceneWidth, sceneHeight, timeNanos)
+        drawObjects(scene, sceneWidth, sceneHeight, timeNanos, columns)
 
         asciiFilter.draw(
             canvas = canvas,
             scene = bitmap,
             viewWidth = width,
             viewHeight = height,
-            requestedColumns = settings.columns,
-            glyphColorArgb = settings.glyphColorArgb,
+            requestedColumns = columns,
+            glyphColorArgb = effectiveGlyphColor(),
             backgroundColorArgb = settings.backgroundColorArgb,
             photoRamp = settings.style == ShapeStyle.PHOTO,
             symbolStyle = settings.symbolStyle
         )
+        updateAdaptiveColumns(started)
+    }
+
+    private fun renderColumns(): Int {
+        if (!settings.adaptivePerformance) {
+            adaptiveColumns = settings.columns
+            return settings.columns
+        }
+        if (adaptiveColumns == 0) adaptiveColumns = settings.columns
+        return adaptiveColumns.coerceIn(
+            WallpaperSettings.MIN_COLUMNS,
+            WallpaperSettings.MAX_COLUMNS
+        )
+    }
+
+    private fun updateAdaptiveColumns(startedNanos: Long) {
+        if (!settings.adaptivePerformance) {
+            adaptiveColumns = settings.columns
+            return
+        }
+        if (settings.style == ShapeStyle.FASTFETCH ||
+            settings.style == ShapeStyle.PHOTO && mediaFrameSet == null
+        ) {
+            // Fastfetch has its own 1 fps text path, and a still photo draws
+            // once. Reducing their density based on a 60/120 fps budget would
+            // punish the user for a load that is not a continuous frame loop.
+            return
+        }
+        val effectiveFps = if (settings.style == ShapeStyle.PHOTO) {
+            animatedFrameRate()
+        } else {
+            settings.targetFps.coerceAtLeast(1)
+        }
+        val elapsed = (System.nanoTime() - startedNanos).toFloat()
+        adaptiveEmaNanos = if (adaptiveEmaNanos == 0f) {
+            elapsed
+        } else {
+            adaptiveEmaNanos * 0.88f + elapsed * 0.12f
+        }
+        if (adaptiveCooldown > 0) {
+            adaptiveCooldown--
+            return
+        }
+        val budget = 1_000_000_000f / effectiveFps.coerceAtLeast(1)
+        if (adaptiveEmaNanos > budget * 1.30f &&
+            adaptiveColumns > WallpaperSettings.MIN_COLUMNS
+        ) {
+            adaptiveColumns = (adaptiveColumns - 12)
+                .coerceAtLeast(WallpaperSettings.MIN_COLUMNS)
+            adaptiveEmaNanos *= 0.50f
+            adaptiveCooldown = 7
+        } else if (adaptiveEmaNanos < budget * 0.55f &&
+            adaptiveColumns < settings.columns
+        ) {
+            adaptiveColumns = (adaptiveColumns + 3).coerceAtMost(settings.columns)
+            adaptiveEmaNanos *= 0.72f
+            adaptiveCooldown = 30
+        }
+    }
+
+    /**
+     * The WAVES style briefly tints the whole glyph grid green when a charger
+     * is connected. The rest of the styles keep the user's selected colour.
+     */
+    private fun effectiveGlyphColor(): Int {
+        if (settings.style != ShapeStyle.WAVES) return settings.glyphColorArgb
+        val mix = waveScene.chargeColorMix()
+        if (mix <= 0.001f) return settings.glyphColorArgb
+        val base = settings.glyphColorArgb
+        val green = 0xFF6DFF82.toInt()
+        val inv = 1f - mix.coerceIn(0f, 1f)
+        val a = ((base ushr 24) and 0xFF) * inv + 255 * mix
+        val r = ((base ushr 16) and 0xFF) * inv + ((green ushr 16) and 0xFF) * mix
+        val g = ((base ushr 8) and 0xFF) * inv + ((green ushr 8) and 0xFF) * mix
+        val b = (base and 0xFF) * inv + (green and 0xFF) * mix
+        return (a.toInt().coerceIn(0, 255) shl 24) or
+            (r.toInt().coerceIn(0, 255) shl 16) or
+            (g.toInt().coerceIn(0, 255) shl 8) or
+            b.toInt().coerceIn(0, 255)
     }
 
     private fun advanceRotation(dt: Float, timeNanos: Long) {
@@ -300,6 +502,18 @@ class AsciiRenderer(private val context: Context? = null) {
                 )
             }
 
+            ShapeStyle.ANDROID_LOGO -> {
+                val boost = if (unlockEffectStyle == ShapeStyle.ANDROID_LOGO) {
+                    boostEnvelope(
+                        (timeNanos - unlockEffectStartNanos) / 1_000_000_000f,
+                        2.5f
+                    )
+                } else {
+                    1f
+                }
+                robotAngle = wrapDegrees(robotAngle + speed * dt * 1.35f * boost)
+            }
+
             else -> Unit
         }
     }
@@ -327,8 +541,8 @@ class AsciiRenderer(private val context: Context? = null) {
         return if (isTop) 0.28f else 0.72f
     }
 
-    private fun ensureScene(viewWidth: Int, viewHeight: Int) {
-        val targetWidth = (settings.columns * SAMPLES_PER_CHAR)
+    private fun ensureScene(viewWidth: Int, viewHeight: Int, columns: Int) {
+        val targetWidth = (columns * SAMPLES_PER_CHAR)
             .coerceIn(120, MAX_SCENE_WIDTH)
         val aspect = viewHeight.toFloat() / viewWidth.toFloat()
         val proportionalHeight = targetWidth * aspect
@@ -368,7 +582,8 @@ class AsciiRenderer(private val context: Context? = null) {
         canvas: Canvas,
         width: Int,
         height: Int,
-        timeNanos: Long
+        timeNanos: Long,
+        columns: Int
     ) {
         when (settings.style) {
             ShapeStyle.FUSILLI, ShapeStyle.CUBES -> drawCornerPair(canvas, width, height)
@@ -397,7 +612,7 @@ class AsciiRenderer(private val context: Context? = null) {
                     canvas = canvas,
                     width = width,
                     height = height,
-                    columns = settings.columns,
+                    columns = columns,
                     spinDegrees = dnaSpin,
                     excitement = dnaExcitement(timeNanos),
                     lineWidthScale = settings.lineWidth
@@ -409,13 +624,48 @@ class AsciiRenderer(private val context: Context? = null) {
                     canvas = canvas,
                     width = width,
                     height = height,
-                    columns = settings.columns,
+                    columns = columns,
                     spinDegrees = blackHoleSpin,
                     timeSeconds = elapsedSeconds,
                     unlockAgeSeconds = unlockAgeSeconds(timeNanos, ShapeStyle.BLACK_HOLE),
                     lineWidthScale = settings.lineWidth
                 )
             }
+
+            ShapeStyle.ANDROID_LOGO -> {
+                // The mesh is taller than the cube's unit box. In portrait the
+                // width is the useful limit; in landscape the height is much
+                // smaller, so cap both to keep the antennae and feet on-screen.
+                val radius = min(width * 0.68f, height * 0.44f)
+                drawObject(
+                    canvas = canvas,
+                    mesh = robotMesh,
+                    centerX = width * 0.5f,
+                    centerY = height * 0.51f,
+                    radius = radius,
+                    rx = -7f,
+                    ry = robotAngle,
+                    rz = 0f,
+                    drawEdges = false,
+                    outline = true,
+                    edgeWidthScale = 0.72f
+                )
+            }
+
+            ShapeStyle.WAVES -> {
+                waveScene.draw(
+                    canvas = canvas,
+                    width = width,
+                    height = height,
+                    columns = columns,
+                    timeSeconds = elapsedSeconds,
+                    lineWidthScale = settings.lineWidth,
+                    speedScale = (settings.speedDegPerSec / 9f)
+                        .coerceIn(0.25f, 5f)
+                )
+            }
+
+            ShapeStyle.FASTFETCH -> Unit
 
             ShapeStyle.PHOTO -> drawPhoto(canvas, width, height)
         }
@@ -653,7 +903,8 @@ class AsciiRenderer(private val context: Context? = null) {
         ry: Float,
         rz: Float,
         drawEdges: Boolean,
-        edgeWidthScale: Float = 1f
+        edgeWidthScale: Float = 1f,
+        outline: Boolean = false
     ) {
         rotation.setEulerDegrees(rx, ry, rz)
 
@@ -694,31 +945,7 @@ class AsciiRenderer(private val context: Context? = null) {
         // даунсемплинга сливались бы в неразборчивое пятно. Одна яркая линия
         // толщиной примерно в один будущий символ читается гораздо лучше.
         if (drawEdges) {
-            edgePaint.strokeWidth = (
-                sceneWidth.toFloat() / settings.columns.coerceAtLeast(1)
-                ).coerceAtLeast(1.8f) *
-                1.15f *
-                edgeWidthScale *
-                settings.lineWidth.coerceIn(
-                    WallpaperSettings.MIN_LINE_WIDTH,
-                    WallpaperSettings.MAX_LINE_WIDTH
-                )
-            val edges = mesh.edgeIndices
-            var e = 0
-            while (e < edges.size) {
-                val a = edges[e]
-                val b = edges[e + 1]
-                if (vertexValid[a] && vertexValid[b]) {
-                    canvas.drawLine(
-                        screenX[a],
-                        screenY[a],
-                        screenX[b],
-                        screenY[b],
-                        edgePaint
-                    )
-                }
-                e += 2
-            }
+            drawMeshEdges(canvas, mesh, edgeWidthScale)
             return
         }
 
@@ -802,6 +1029,39 @@ class AsciiRenderer(private val context: Context? = null) {
             trianglePath.lineTo(screenX[i2], screenY[i2])
             trianglePath.close()
             canvas.drawPath(trianglePath, fillPaint)
+        }
+
+        if (outline) {
+            drawMeshEdges(canvas, mesh, edgeWidthScale)
+        }
+    }
+
+    private fun drawMeshEdges(canvas: Canvas, mesh: Mesh, edgeWidthScale: Float) {
+        if (mesh.edgeIndices.isEmpty()) return
+        edgePaint.strokeWidth = (
+            sceneWidth.toFloat() / settings.columns.coerceAtLeast(1)
+            ).coerceAtLeast(1.8f) *
+            1.15f *
+            edgeWidthScale *
+            settings.lineWidth.coerceIn(
+                WallpaperSettings.MIN_LINE_WIDTH,
+                WallpaperSettings.MAX_LINE_WIDTH
+            )
+        val edges = mesh.edgeIndices
+        var e = 0
+        while (e < edges.size) {
+            val a = edges[e]
+            val b = edges[e + 1]
+            if (vertexValid[a] && vertexValid[b]) {
+                canvas.drawLine(
+                    screenX[a],
+                    screenY[a],
+                    screenX[b],
+                    screenY[b],
+                    edgePaint
+                )
+            }
+            e += 2
         }
     }
 

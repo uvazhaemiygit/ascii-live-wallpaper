@@ -1,9 +1,12 @@
 package com.asciiwallpaper
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -59,6 +62,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,7 +88,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -215,11 +218,21 @@ fun SettingsScreen(
     var photoRevision by rememberSaveable {
         mutableIntStateOf(initialSettings.photoRevision)
     }
+    var photoAnimated by rememberSaveable {
+        mutableStateOf(initialSettings.photoAnimated)
+    }
     var photoReady by rememberSaveable {
-        mutableStateOf(PhotoAsciiStore.hasPhoto(appContext))
+        mutableStateOf(MediaAsciiStore.hasVisual(appContext))
     }
     var photoBusy by remember { mutableStateOf(false) }
     var photoError by remember { mutableStateOf(false) }
+    var audioReactive by rememberSaveable {
+        mutableStateOf(initialSettings.audioReactiveEnabled)
+    }
+    var audioError by remember { mutableStateOf(false) }
+    var adaptivePerformance by rememberSaveable {
+        mutableStateOf(initialSettings.adaptivePerformance)
+    }
     var showPhotoFitSheet by rememberSaveable { mutableStateOf(false) }
     var showGlyphColorPicker by rememberSaveable { mutableStateOf(false) }
     var showBackgroundColorPicker by rememberSaveable { mutableStateOf(false) }
@@ -240,11 +253,52 @@ fun SettingsScreen(
         lineWidth = lineWidth,
         unlockAnimationEnabled = unlockAnimationEnabled,
         photoRevision = photoRevision,
-        photoFit = photoFit
+        photoFit = photoFit,
+        photoAnimated = photoAnimated,
+        audioReactiveEnabled = audioReactive,
+        adaptivePerformance = adaptivePerformance
     ).sanitized()
 
     fun commit(updated: WallpaperSettings = currentSettings) {
         onSettingsChanged(updated.sanitized())
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            audioReactive = true
+            audioError = false
+            onSettingsChanged(
+                Prefs.load(appContext).copy(audioReactiveEnabled = true).sanitized()
+            )
+        } else {
+            audioReactive = false
+            audioError = true
+            onSettingsChanged(
+                Prefs.load(appContext).copy(audioReactiveEnabled = false).sanitized()
+            )
+        }
+    }
+
+    fun setAudioReactive(enabled: Boolean) {
+        if (!enabled) {
+            audioReactive = false
+            audioError = false
+            commit(currentSettings.copy(audioReactiveEnabled = false))
+            return
+        }
+        if (ContextCompat.checkSelfPermission(
+                appContext,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            audioReactive = true
+            audioError = false
+            commit(currentSettings.copy(audioReactiveEnabled = true))
+        } else {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
     }
 
     val photoPicker = rememberLauncherForActivityResult(
@@ -254,9 +308,9 @@ fun SettingsScreen(
         photoBusy = true
         photoError = false
         photoScope.launch {
-            val revision = try {
+            val result = try {
                 withContext(Dispatchers.IO) {
-                    PhotoAsciiStore.import(appContext, uri)
+                    MediaAsciiStore.import(appContext, uri)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -264,16 +318,24 @@ fun SettingsScreen(
                 null
             }
             photoBusy = false
-            if (revision == null) {
+            if (result == null) {
                 photoError = true
             } else {
+                val revision = when (result) {
+                    is MediaAsciiStore.ImportResult.Still -> result.revision
+                    is MediaAsciiStore.ImportResult.Animated -> result.revision
+                }
                 photoRevision = revision
+                photoAnimated = result is MediaAsciiStore.ImportResult.Animated
                 photoReady = true
                 // Preserve whatever style/resolution is current. The user may
-                // have switched away while the image was being processed.
+                // have switched away while the media was being processed.
                 onSettingsChanged(
                     Prefs.load(appContext)
-                        .copy(photoRevision = revision)
+                        .copy(
+                            photoRevision = revision,
+                            photoAnimated = result is MediaAsciiStore.ImportResult.Animated
+                        )
                         .sanitized()
                 )
                 showPhotoFitSheet = true
@@ -398,9 +460,30 @@ fun SettingsScreen(
                         onClick = { selectStyle(ShapeStyle.BLACK_HOLE) }
                     )
                     StyleOption(
+                        title = stringResource(R.string.style_fastfetch),
+                        detail = stringResource(R.string.style_fastfetch_detail),
+                        tag = "SYSINFO",
+                        selected = style == ShapeStyle.FASTFETCH,
+                        onClick = { selectStyle(ShapeStyle.FASTFETCH) }
+                    )
+                    StyleOption(
+                        title = stringResource(R.string.style_android_logo),
+                        detail = stringResource(R.string.style_android_logo_detail),
+                        tag = "ANDROID",
+                        selected = style == ShapeStyle.ANDROID_LOGO,
+                        onClick = { selectStyle(ShapeStyle.ANDROID_LOGO) }
+                    )
+                    StyleOption(
+                        title = stringResource(R.string.style_waves),
+                        detail = stringResource(R.string.style_waves_detail),
+                        tag = "AUDIO",
+                        selected = style == ShapeStyle.WAVES,
+                        onClick = { selectStyle(ShapeStyle.WAVES) }
+                    )
+                    StyleOption(
                         title = stringResource(R.string.style_photo),
                         detail = stringResource(R.string.style_photo_detail),
-                        tag = "MY PHOTO",
+                        tag = "MEDIA",
                         selected = style == ShapeStyle.PHOTO,
                         onClick = { selectStyle(ShapeStyle.PHOTO) }
                     )
@@ -416,7 +499,7 @@ fun SettingsScreen(
                             photoError = false
                             photoPicker.launch(
                                 PickVisualMediaRequest(
-                                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                                    ActivityResultContracts.PickVisualMedia.ImageAndVideo
                                 )
                             )
                         },
@@ -474,7 +557,23 @@ fun SettingsScreen(
                     )
                 }
 
-                if (style != ShapeStyle.PHOTO) {
+                if (style == ShapeStyle.WAVES) {
+                    InfoToggleCard(
+                        icon = "♪",
+                        title = stringResource(R.string.audio_reactive_title),
+                        detail = stringResource(R.string.audio_reactive_detail) +
+                            if (audioError) {
+                                "\n\n" + stringResource(R.string.audio_permission_denied)
+                            } else {
+                                ""
+                            },
+                        enabled = audioReactive,
+                        toggleDescription = stringResource(R.string.audio_reactive_toggle),
+                        onToggle = ::setAudioReactive
+                    )
+                }
+
+                if (style != ShapeStyle.PHOTO && style != ShapeStyle.FASTFETCH) {
                     SettingsCard {
                         SectionLabel(stringResource(R.string.section_motion))
                         Spacer(Modifier.height(10.dp))
@@ -556,15 +655,57 @@ fun SettingsScreen(
                         )
                     }
 
-                    UnlockNoteCard(
-                        enabled = unlockAnimationEnabled,
-                        onToggle = { enabled ->
-                            unlockAnimationEnabled = enabled
-                            commit(currentSettings.copy(
+                    if (style != ShapeStyle.WAVES) {
+                        UnlockNoteCard(
+                            enabled = unlockAnimationEnabled,
+                            onToggle = { enabled ->
                                 unlockAnimationEnabled = enabled
-                            ))
+                                commit(currentSettings.copy(
+                                    unlockAnimationEnabled = enabled
+                                ))
+                            }
+                        )
+                    }
+                }
+
+                SettingsCard {
+                    SectionLabel(stringResource(R.string.section_performance))
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.adaptive_performance_title),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextPrimary
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = stringResource(R.string.adaptive_performance_detail),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextMuted
+                            )
                         }
-                    )
+                        Spacer(Modifier.width(8.dp))
+                        Switch(
+                            checked = adaptivePerformance,
+                            onCheckedChange = { enabled ->
+                                adaptivePerformance = enabled
+                                commit(currentSettings.copy(
+                                    adaptivePerformance = enabled
+                                ))
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = AppBackground,
+                                checkedTrackColor = AccentGreenStrong,
+                                uncheckedThumbColor = TextMuted,
+                                uncheckedTrackColor = Color(0xFF263A2B),
+                                uncheckedBorderColor = PanelBorder
+                            )
+                        )
+                    }
                 }
 
                 SettingsCard {
@@ -670,7 +811,7 @@ fun SettingsScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "ASCII LIVE WALLPAPER  /  v1.2.5",
+                    text = "ASCII LIVE WALLPAPER  /  v1.3.0",
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted.copy(alpha = 0.55f),
@@ -1047,7 +1188,10 @@ private fun previewStyleBadge(style: ShapeStyle): String = when (style) {
     ShapeStyle.BIG_CUBE -> "BIG CUBE ×1"
     ShapeStyle.DNA -> "DNA HELIX"
     ShapeStyle.BLACK_HOLE -> "EVENT HORIZON"
-    ShapeStyle.PHOTO -> "MY PHOTO"
+    ShapeStyle.FASTFETCH -> "FASTFETCH"
+    ShapeStyle.ANDROID_LOGO -> "ANDROID 3D"
+    ShapeStyle.WAVES -> "WAVES / AUDIO"
+    ShapeStyle.PHOTO -> "MEDIA"
 }
 
 @Composable
@@ -1062,13 +1206,41 @@ private fun LiveAsciiPreview(
     val lifecycleOwner = LocalLifecycleOwner.current
     var frameTimeNanos by remember { mutableLongStateOf(System.nanoTime()) }
 
-    LaunchedEffect(lifecycleOwner, settings.targetFps) {
-        val frameDelayMs = (1_000L / settings.targetFps.coerceAtLeast(1))
-            .coerceAtLeast(8L)
+    LaunchedEffect(
+        lifecycleOwner,
+        settings.targetFps,
+        settings.style,
+        settings.photoAnimated
+    ) {
+        // The preview does not need 120 fps to be useful. Capping it also
+        // avoids flooding Compose with state writes on high-refresh displays;
+        // the wallpaper engine keeps its own target. Fastfetch is static text,
+        // so a few refreshes per second are plenty.
+        if (settings.style == ShapeStyle.PHOTO && !settings.photoAnimated) {
+            // A still photo is already complete after its first draw. The
+            // Canvas is invalidated by recomposition whenever a setting
+            // changes, so a permanent 12 fps redraw only heats the phone.
+            return@LaunchedEffect
+        }
+        val previewFps = when (settings.style) {
+            ShapeStyle.FASTFETCH -> 4
+            // Animated media is cached at 12 fps; there is no point in
+            // running the preview at 45 fps.
+            ShapeStyle.PHOTO -> 12
+            else -> settings.targetFps.coerceIn(1, 45)
+        }
+        val intervalNanos = 1_000_000_000L / previewFps
+        var lastAccepted = 0L
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
-                frameTimeNanos = System.nanoTime()
-                delay(frameDelayMs)
+                withFrameNanos { frameTime ->
+                    if (lastAccepted == 0L ||
+                        frameTime - lastAccepted >= intervalNanos
+                    ) {
+                        lastAccepted = frameTime
+                        frameTimeNanos = frameTime
+                    }
+                }
             }
         }
     }
@@ -1707,6 +1879,65 @@ private fun UnlockNoteCard(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = stringResource(R.string.unlock_detail),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(
+                checked = enabled,
+                onCheckedChange = onToggle,
+                modifier = Modifier.semantics {
+                    contentDescription = toggleDescription
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = AppBackground,
+                    checkedTrackColor = AccentGreenStrong,
+                    uncheckedThumbColor = TextMuted,
+                    uncheckedTrackColor = Color(0xFF263A2B),
+                    uncheckedBorderColor = PanelBorder
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun InfoToggleCard(
+    icon: String,
+    title: String,
+    detail: String,
+    enabled: Boolean,
+    toggleDescription: String,
+    onToggle: (Boolean) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0B150D)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF243D29))
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = icon,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 25.sp,
+                color = AccentGreen
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (enabled) TextPrimary else TextMuted
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = detail,
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted
                 )

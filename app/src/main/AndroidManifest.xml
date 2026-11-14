@@ -4,6 +4,12 @@
     <uses-feature
         android:name="android.software.live_wallpaper"
         android:required="true" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
+    <!-- Optional: only requested while the WAVES microphone visualiser is enabled. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:allowBackup="false"

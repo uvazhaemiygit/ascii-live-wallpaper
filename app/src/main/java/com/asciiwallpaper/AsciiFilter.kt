@@ -206,6 +206,178 @@ class AsciiFilter(context: Context? = null) {
         }
     }
 
+    /**
+     * Draws an already grayscale frame, such as an exported GIF/video frame.
+     * The source is fitted into the view with CONTAIN or COVER math inside the
+     * cell loop, so no per-frame Bitmap allocation or full-screen resampling is
+     * needed. A 3x3 sample grid per cell also makes the letterbox edge dim
+     * smoothly instead of producing a hard white row.
+     */
+    fun drawGray(
+        canvas: Canvas,
+        pixels: ByteArray,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        viewWidth: Int,
+        viewHeight: Int,
+        requestedColumns: Int,
+        glyphColorArgb: Int,
+        backgroundColorArgb: Int,
+        fit: PhotoFit,
+        symbolStyle: SymbolStyle
+    ) {
+        configure(viewWidth, viewHeight, requestedColumns)
+        canvas.drawColor(backgroundColorArgb)
+
+        if (sourceWidth <= 0 || sourceHeight <= 0 ||
+            pixels.size < sourceWidth * sourceHeight
+        ) {
+            return
+        }
+
+        val widthScale = viewWidth.toFloat() / sourceWidth
+        val heightScale = viewHeight.toFloat() / sourceHeight
+        val scale = when (fit) {
+            PhotoFit.CONTAIN -> min(widthScale, heightScale)
+            PhotoFit.COVER -> kotlin.math.max(widthScale, heightScale)
+        }.coerceAtLeast(0.0001f)
+        val drawWidth = sourceWidth * scale
+        val drawHeight = sourceHeight * scale
+        val left = (viewWidth - drawWidth) * 0.5f
+        val top = (viewHeight - drawHeight) * 0.5f
+        val invScale = 1f / scale
+
+        if (symbolStyle == SymbolStyle.NOTHING) {
+            drawNothingGray(
+                canvas, pixels, sourceWidth, sourceHeight,
+                left, top, invScale, glyphColorArgb
+            )
+        } else {
+            drawAsciiGray(
+                canvas, pixels, sourceWidth, sourceHeight,
+                left, top, invScale, glyphColorArgb
+            )
+        }
+    }
+
+    private fun averageGray(
+        pixels: ByteArray,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        left: Float,
+        top: Float,
+        invScale: Float,
+        cellLeft: Float,
+        cellTop: Float
+    ): Int {
+        var sum = 0
+        var samples = 0
+        for (sy in 0 until 3) {
+            val viewY = cellTop + cellHeight * (sy + 0.5f) / 3f
+            val sourceY = ((viewY - top) * invScale).toInt()
+            if (sourceY < 0 || sourceY >= sourceHeight) {
+                samples += 3
+                continue
+            }
+            for (sx in 0 until 3) {
+                val viewX = cellLeft + cellWidth * (sx + 0.5f) / 3f
+                val sourceX = ((viewX - left) * invScale).toInt()
+                if (sourceX in 0 until sourceWidth) {
+                    sum += pixels[sourceY * sourceWidth + sourceX].toInt() and 0xFF
+                }
+                samples++
+            }
+        }
+        return if (samples == 0) 0 else sum / samples
+    }
+
+    @Suppress("DEPRECATION")
+    private fun drawAsciiGray(
+        canvas: Canvas,
+        pixels: ByteArray,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        left: Float,
+        top: Float,
+        invScale: Float,
+        glyphColorArgb: Int
+    ) {
+        var writeIndex = 0
+        for (row in 0 until rows) {
+            rowHasInk[row] = false
+            val cellTop = row * cellHeight
+            for (col in 0 until columns) {
+                val average = averageGray(
+                    pixels, sourceWidth, sourceHeight, left, top, invScale,
+                    col * cellWidth, cellTop
+                )
+                val ch = photoRampLut[average.coerceIn(0, 255)]
+                charBuffer[writeIndex++] = ch
+                if (ch != ' ') rowHasInk[row] = true
+            }
+        }
+
+        glyphPaint.color = glyphColorArgb
+        val rightEdgeScale = if (blockScaleX > 0f) blockScaleX else 1f
+        canvas.save()
+        canvas.scale(rightEdgeScale, 1f)
+        var rowStart = 0
+        for (row in 0 until rows) {
+            if (rowHasInk[row]) {
+                val baseline = row * cellHeight + baselineOffset
+                for (col in 0 until columns) {
+                    glyphPositions[col * 2 + 1] = baseline
+                }
+                canvas.drawPosText(
+                    charBuffer, rowStart, columns, glyphPositions, glyphPaint
+                )
+            }
+            rowStart += columns
+        }
+        canvas.restore()
+    }
+
+    private fun drawNothingGray(
+        canvas: Canvas,
+        pixels: ByteArray,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        left: Float,
+        top: Float,
+        invScale: Float,
+        glyphColorArgb: Int
+    ) {
+        ensureDotBuffers(columns * rows)
+        for (row in 0 until rows) {
+            val cellTop = row * cellHeight
+            val centerY = (row + 0.5f) * cellHeight
+            for (col in 0 until columns) {
+                val average = averageGray(
+                    pixels, sourceWidth, sourceHeight, left, top, invScale,
+                    col * cellWidth, cellTop
+                )
+                val level = photoDotLut[average.coerceIn(0, 255)].toInt()
+                if (level == 0) continue
+                val count = dotCounts[level]
+                val target = dotPositions[level]
+                val offset = count * 2
+                target[offset] = (col + 0.5f) * cellWidth
+                target[offset + 1] = centerY
+                dotCounts[level] = count + 1
+            }
+        }
+
+        val minCell = min(cellWidth, cellHeight)
+        dotPaint.color = glyphColorArgb
+        for (level in 1 until DOT_LEVELS) {
+            val count = dotCounts[level]
+            if (count == 0) continue
+            val fraction = level / (DOT_LEVELS - 1f)
+            dotPaint.strokeWidth = minCell * (0.10f + 0.84f * fraction)
+            canvas.drawPoints(dotPositions[level], 0, count * 2, dotPaint)
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun drawAsciiGrid(
         canvas: Canvas,

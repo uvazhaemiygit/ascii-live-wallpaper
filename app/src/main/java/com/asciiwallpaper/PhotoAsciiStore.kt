@@ -42,6 +42,14 @@ object PhotoAsciiStore {
 
     fun hasPhoto(context: Context): Boolean = file(context).isFile
 
+    @Synchronized
+    fun clear(context: Context) {
+        cachedRevision = Int.MIN_VALUE
+        cachedBitmap = null
+        val target = file(context)
+        if (target.exists()) target.delete()
+    }
+
     /**
      * Decodes, rotates, converts to grayscale, stretches the tonal range and
      * stores the result atomically. Returns a new revision on success.
@@ -71,6 +79,9 @@ object PhotoAsciiStore {
                 Log.w(TAG, "Cannot install photo source")
                 return null
             }
+
+            // A still photo and an animated clip are mutually exclusive.
+            MediaAsciiStore.clear(context)
 
             val revision = (System.currentTimeMillis() and Int.MAX_VALUE.toLong())
                 .toInt()
