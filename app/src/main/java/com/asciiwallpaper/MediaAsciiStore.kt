@@ -65,23 +65,26 @@ object MediaAsciiStore {
     }
 
     @Volatile
-    private var cachedRevision = Int.MIN_VALUE
+    private var cachedRevision = IntArray(MediaSlot.entries.size) { Int.MIN_VALUE }
 
     @Volatile
-    private var cachedFrames: FrameSet? = null
+    private var cachedFrames = arrayOfNulls<FrameSet>(MediaSlot.entries.size)
 
-    fun file(context: Context): File = File(context.filesDir, FILE_NAME)
+    fun file(context: Context, slot: MediaSlot = MediaSlot.MAIN): File =
+        File(context.filesDir, fileName(slot))
 
-    fun hasMedia(context: Context): Boolean = file(context).isFile
+    fun hasMedia(context: Context, slot: MediaSlot = MediaSlot.MAIN): Boolean =
+        file(context, slot).isFile
 
-    fun hasVisual(context: Context): Boolean =
-        PhotoAsciiStore.hasPhoto(context) || hasMedia(context)
+    fun hasVisual(context: Context, slot: MediaSlot = MediaSlot.MAIN): Boolean =
+        PhotoAsciiStore.hasPhoto(context, slot) || hasMedia(context, slot)
 
     @Synchronized
-    fun clear(context: Context) {
-        cachedFrames = null
-        cachedRevision = Int.MIN_VALUE
-        val target = file(context)
+    fun clear(context: Context, slot: MediaSlot = MediaSlot.MAIN) {
+        val index = slot.ordinal
+        cachedFrames[index] = null
+        cachedRevision[index] = Int.MIN_VALUE
+        val target = file(context, slot)
         if (target.exists()) target.delete()
     }
 
@@ -90,7 +93,11 @@ object MediaAsciiStore {
      * cannot be decoded as either kind of media.
      */
     @Synchronized
-    fun import(context: Context, uri: Uri): ImportResult? {
+    fun import(
+        context: Context,
+        uri: Uri,
+        slot: MediaSlot = MediaSlot.MAIN
+    ): ImportResult? {
         val resolver = context.contentResolver
         val mime = try {
             resolver.getType(uri).orEmpty().lowercase()
@@ -124,23 +131,23 @@ object MediaAsciiStore {
             name.endsWith(".avi")
         if (mime.startsWith("video/") || videoByName) {
             val frames = extractVideo(context, uri) ?: return null
-            return installAnimated(context, frames)
+            return installAnimated(context, frames, slot)
         }
 
         if (mime == "image/gif" || name.endsWith(".gif")) {
             val frames = extractGif(context, uri)
             if (frames != null && frames.frames.size >= 2) {
-                return installAnimated(context, frames)
+                return installAnimated(context, frames, slot)
             }
             // A one-frame GIF is just a still image. Let the still importer
             // use its EXIF/color/auto-contrast pipeline.
-            val revision = PhotoAsciiStore.import(context, uri) ?: return null
+            val revision = PhotoAsciiStore.import(context, uri, slot) ?: return null
             return ImportResult.Still(revision)
         }
 
         // Ordinary image (including a one-frame WebP) that the still importer
         // can handle.
-        val revision = PhotoAsciiStore.import(context, uri) ?: return null
+        val revision = PhotoAsciiStore.import(context, uri, slot) ?: return null
         return ImportResult.Still(revision)
     }
 
@@ -149,12 +156,17 @@ object MediaAsciiStore {
      * the live settings preview receive the same immutable object.
      */
     @Synchronized
-    fun load(context: Context, revision: Int): FrameSet? {
-        if (revision == cachedRevision) return cachedFrames
-        cachedRevision = revision
-        cachedFrames = null
+    fun load(
+        context: Context,
+        revision: Int,
+        slot: MediaSlot = MediaSlot.MAIN
+    ): FrameSet? {
+        val index = slot.ordinal
+        if (revision == cachedRevision[index]) return cachedFrames[index]
+        cachedRevision[index] = revision
+        cachedFrames[index] = null
 
-        val target = file(context)
+        val target = file(context, slot)
         if (!target.isFile) return null
 
         return try {
@@ -180,7 +192,7 @@ object MediaAsciiStore {
                     input.readFully(frame)
                 }
                 FrameSet(width, height, fps.coerceIn(1f, 30f), frames)
-                    .also { cachedFrames = it }
+                    .also { cachedFrames[index] = it }
             }
         } catch (t: Throwable) {
             Log.w(TAG, "Cannot load media cache", t)
@@ -188,10 +200,36 @@ object MediaAsciiStore {
         }
     }
 
-    private fun installAnimated(context: Context, frameSet: FrameSet): ImportResult? {
+    /**
+     * Loads a slot as a frame set even when the source is a still photo. The
+     * lock/home style needs both sides in the same shape so the transition
+     * code does not care whether the user picked a JPEG or a video.
+     */
+    @Synchronized
+    fun loadFrameSet(
+        context: Context,
+        revision: Int,
+        animated: Boolean,
+        slot: MediaSlot
+    ): FrameSet? {
+        if (animated) return load(context, revision, slot)
+        val bitmap = PhotoAsciiStore.load(context, revision, slot) ?: return null
+        return FrameSet(
+            width = bitmap.width,
+            height = bitmap.height,
+            fps = 1f,
+            frames = arrayOf(bitmapToGray(bitmap))
+        )
+    }
+
+    private fun installAnimated(
+        context: Context,
+        frameSet: FrameSet,
+        slot: MediaSlot
+    ): ImportResult? {
         if (frameSet.frames.isEmpty()) return null
-        val target = file(context)
-        val temporary = File(context.filesDir, "$FILE_NAME.tmp")
+        val target = file(context, slot)
+        val temporary = File(context.filesDir, "${fileName(slot)}.tmp")
 
         return try {
             DataOutputStream(BufferedOutputStream(FileOutputStream(temporary))).use { output ->
@@ -213,13 +251,14 @@ object MediaAsciiStore {
                 return null
             }
 
-            PhotoAsciiStore.clear(context)
+            PhotoAsciiStore.clear(context, slot)
 
             val revision = (System.currentTimeMillis() and Int.MAX_VALUE.toLong())
                 .toInt()
                 .coerceAtLeast(1)
-            cachedRevision = revision
-            cachedFrames = frameSet
+            val index = slot.ordinal
+            cachedRevision[index] = revision
+            cachedFrames[index] = frameSet
             ImportResult.Animated(revision)
         } catch (t: Throwable) {
             Log.w(TAG, "Cannot write media cache", t)
@@ -227,6 +266,12 @@ object MediaAsciiStore {
         } finally {
             if (temporary.exists()) temporary.delete()
         }
+    }
+
+    private fun fileName(slot: MediaSlot): String = when (slot) {
+        MediaSlot.MAIN -> FILE_NAME
+        MediaSlot.LOCK -> "media_frames_lock.bin"
+        MediaSlot.HOME -> "media_frames_home.bin"
     }
 
     private fun extractGif(context: Context, uri: Uri): FrameSet? {

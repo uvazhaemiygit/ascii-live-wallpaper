@@ -203,6 +203,9 @@ fun SettingsScreen(
     var glyphColorValue by rememberSaveable {
         mutableIntStateOf(initialSettings.glyphColorArgb)
     }
+    var glyphOpacity by rememberSaveable {
+        mutableIntStateOf(initialSettings.glyphOpacityPercent)
+    }
     var backgroundColorValue by rememberSaveable {
         mutableIntStateOf(initialSettings.backgroundColorArgb)
     }
@@ -242,6 +245,35 @@ fun SettingsScreen(
     }
     var photoBusy by remember { mutableStateOf(false) }
     var photoError by remember { mutableStateOf(false) }
+    var lockMediaRevision by rememberSaveable {
+        mutableIntStateOf(initialSettings.lockMediaRevision)
+    }
+    var lockMediaAnimated by rememberSaveable {
+        mutableStateOf(initialSettings.lockMediaAnimated)
+    }
+    var homeMediaRevision by rememberSaveable {
+        mutableIntStateOf(initialSettings.homeMediaRevision)
+    }
+    var homeMediaAnimated by rememberSaveable {
+        mutableStateOf(initialSettings.homeMediaAnimated)
+    }
+    var lockHomeTransitionMs by rememberSaveable {
+        mutableIntStateOf(initialSettings.lockHomeTransitionMs)
+    }
+    var lockMediaReady by rememberSaveable {
+        mutableStateOf(
+            MediaAsciiStore.hasVisual(appContext, MediaSlot.LOCK)
+        )
+    }
+    var homeMediaReady by rememberSaveable {
+        mutableStateOf(
+            MediaAsciiStore.hasVisual(appContext, MediaSlot.HOME)
+        )
+    }
+    var lockMediaBusy by remember { mutableStateOf(false) }
+    var homeMediaBusy by remember { mutableStateOf(false) }
+    var lockMediaError by remember { mutableStateOf(false) }
+    var homeMediaError by remember { mutableStateOf(false) }
     var showPhotoFitSheet by rememberSaveable { mutableStateOf(false) }
     var showGlyphColorPicker by rememberSaveable { mutableStateOf(false) }
     var showBackgroundColorPicker by rememberSaveable { mutableStateOf(false) }
@@ -257,6 +289,7 @@ fun SettingsScreen(
         speedDegPerSec = speed,
         symbolStyle = symbolStyle,
         glyphColorArgb = glyphColorValue,
+        glyphOpacityPercent = glyphOpacity,
         backgroundColorArgb = backgroundColorValue,
         targetFps = targetFps,
         lineWidth = lineWidth,
@@ -266,7 +299,12 @@ fun SettingsScreen(
         unlockAnimationEnabled = unlockAnimationEnabled,
         photoRevision = photoRevision,
         photoFit = photoFit,
-        photoAnimated = photoAnimated
+        photoAnimated = photoAnimated,
+        lockMediaRevision = lockMediaRevision,
+        lockMediaAnimated = lockMediaAnimated,
+        homeMediaRevision = homeMediaRevision,
+        homeMediaAnimated = homeMediaAnimated,
+        lockHomeTransitionMs = lockHomeTransitionMs
     ).sanitized()
 
     fun commit(updated: WallpaperSettings = currentSettings) {
@@ -311,6 +349,86 @@ fun SettingsScreen(
                         .sanitized()
                 )
                 showPhotoFitSheet = true
+            }
+        }
+    }
+
+    val lockMediaPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        lockMediaBusy = true
+        lockMediaError = false
+        photoScope.launch {
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    MediaAsciiStore.import(appContext, uri, MediaSlot.LOCK)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                null
+            }
+            lockMediaBusy = false
+            if (result == null) {
+                lockMediaError = true
+            } else {
+                val revision = when (result) {
+                    is MediaAsciiStore.ImportResult.Still -> result.revision
+                    is MediaAsciiStore.ImportResult.Animated -> result.revision
+                }
+                lockMediaRevision = revision
+                lockMediaAnimated = result is MediaAsciiStore.ImportResult.Animated
+                lockMediaReady = true
+                onSettingsChanged(
+                    Prefs.load(appContext)
+                        .copy(
+                            lockMediaRevision = revision,
+                            lockMediaAnimated =
+                                result is MediaAsciiStore.ImportResult.Animated
+                        )
+                        .sanitized()
+                )
+            }
+        }
+    }
+
+    val homeMediaPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        homeMediaBusy = true
+        homeMediaError = false
+        photoScope.launch {
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    MediaAsciiStore.import(appContext, uri, MediaSlot.HOME)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                null
+            }
+            homeMediaBusy = false
+            if (result == null) {
+                homeMediaError = true
+            } else {
+                val revision = when (result) {
+                    is MediaAsciiStore.ImportResult.Still -> result.revision
+                    is MediaAsciiStore.ImportResult.Animated -> result.revision
+                }
+                homeMediaRevision = revision
+                homeMediaAnimated = result is MediaAsciiStore.ImportResult.Animated
+                homeMediaReady = true
+                onSettingsChanged(
+                    Prefs.load(appContext)
+                        .copy(
+                            homeMediaRevision = revision,
+                            homeMediaAnimated =
+                                result is MediaAsciiStore.ImportResult.Animated
+                        )
+                        .sanitized()
+                )
             }
         }
     }
@@ -465,6 +583,20 @@ fun SettingsScreen(
                         onClick = { selectStyle(ShapeStyle.BLACK_HOLE) }
                     )
                     StyleOption(
+                        title = stringResource(R.string.style_duck),
+                        detail = stringResource(R.string.style_duck_detail),
+                        tag = "3D DUCK",
+                        selected = style == ShapeStyle.DUCK,
+                        onClick = { selectStyle(ShapeStyle.DUCK) }
+                    )
+                    StyleOption(
+                        title = stringResource(R.string.style_donut),
+                        detail = stringResource(R.string.style_donut_detail),
+                        tag = "3D DONUT",
+                        selected = style == ShapeStyle.DONUT,
+                        onClick = { selectStyle(ShapeStyle.DONUT) }
+                    )
+                    StyleOption(
                         title = stringResource(R.string.style_fastfetch),
                         detail = stringResource(R.string.style_fastfetch_detail),
                         tag = "SYSINFO",
@@ -484,6 +616,13 @@ fun SettingsScreen(
                         tag = "AUDIO",
                         selected = style == ShapeStyle.WAVES,
                         onClick = { selectStyle(ShapeStyle.WAVES) }
+                    )
+                    StyleOption(
+                        title = stringResource(R.string.style_lock_home),
+                        detail = stringResource(R.string.style_lock_home_detail),
+                        tag = "LOCK / HOME",
+                        selected = style == ShapeStyle.LOCK_HOME,
+                        onClick = { selectStyle(ShapeStyle.LOCK_HOME) }
                     )
                     StyleOption(
                         title = stringResource(R.string.style_photo),
@@ -509,6 +648,40 @@ fun SettingsScreen(
                             )
                         },
                         onConfigureFit = { showPhotoFitSheet = true }
+                    )
+                } else if (style == ShapeStyle.LOCK_HOME) {
+                    LockHomePickerCard(
+                        lockReady = lockMediaReady,
+                        homeReady = homeMediaReady,
+                        lockBusy = lockMediaBusy,
+                        homeBusy = homeMediaBusy,
+                        lockError = lockMediaError,
+                        homeError = homeMediaError,
+                        fit = photoFit,
+                        transitionMs = lockHomeTransitionMs,
+                        onPickLock = {
+                            lockMediaError = false
+                            lockMediaPicker.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                                )
+                            )
+                        },
+                        onPickHome = {
+                            homeMediaError = false
+                            homeMediaPicker.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                                )
+                            )
+                        },
+                        onConfigureFit = { showPhotoFitSheet = true },
+                        onTransitionChange = { lockHomeTransitionMs = it },
+                        onTransitionFinished = {
+                            commit(currentSettings.copy(
+                                lockHomeTransitionMs = lockHomeTransitionMs
+                            ))
+                        }
                     )
                 }
 
@@ -571,6 +744,7 @@ fun SettingsScreen(
                     SettingsCard {
                         SectionLabel(stringResource(R.string.section_motion))
                         Spacer(Modifier.height(10.dp))
+                        if (style != ShapeStyle.LOCK_HOME) {
                         LabelWithValue(
                             title = stringResource(R.string.speed_title),
                             value = stringResource(R.string.speed_value, speed.roundToInt())
@@ -687,6 +861,7 @@ fun SettingsScreen(
                                 }
                             )
                         }
+                        } // LOCK_HOME has no spinning object to tune.
                         Spacer(Modifier.height(16.dp))
                         LabelWithValue(
                             title = stringResource(R.string.fps_title),
@@ -714,6 +889,7 @@ fun SettingsScreen(
                         )
                     }
 
+                    if (style != ShapeStyle.LOCK_HOME) {
                     SettingsCard {
                         SectionLabel(stringResource(R.string.section_lines))
                         Spacer(Modifier.height(10.dp))
@@ -746,8 +922,11 @@ fun SettingsScreen(
                             color = TextMuted
                         )
                     }
+                    }
 
-                    if (style != ShapeStyle.WAVES) {
+                    if (style != ShapeStyle.WAVES &&
+                        style != ShapeStyle.LOCK_HOME
+                    ) {
                         UnlockNoteCard(
                             enabled = unlockAnimationEnabled,
                             onToggle = { enabled ->
@@ -814,6 +993,38 @@ fun SettingsScreen(
                         argb = backgroundColorValue,
                         onEdit = { showBackgroundColorPicker = true }
                     )
+                    Spacer(Modifier.height(14.dp))
+                    LabelWithValue(
+                        title = stringResource(R.string.glyph_opacity_title),
+                        value = stringResource(
+                            R.string.glyph_opacity_value,
+                            glyphOpacity
+                        )
+                    )
+                    Slider(
+                        value = glyphOpacity.toFloat(),
+                        onValueChange = { glyphOpacity = it.roundToInt() },
+                        onValueChangeFinished = {
+                            commit(currentSettings.copy(
+                                glyphOpacityPercent = glyphOpacity
+                            ))
+                        },
+                        valueRange = WallpaperSettings.MIN_GLYPH_OPACITY_PERCENT
+                            .toFloat()..WallpaperSettings.MAX_GLYPH_OPACITY_PERCENT
+                            .toFloat(),
+                        steps = 8,
+                        colors = asciiSliderColors()
+                    )
+                    SliderLimits(
+                        start = stringResource(R.string.glyph_opacity_soft),
+                        end = stringResource(R.string.glyph_opacity_solid)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.glyph_opacity_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMuted
+                    )
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = stringResource(R.string.color_custom_hint),
@@ -869,7 +1080,7 @@ fun SettingsScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "ASCII LIVE WALLPAPER  /  v1.4.1",
+                    text = "ASCII LIVE WALLPAPER  /  v1.5.0",
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted.copy(alpha = 0.55f),
@@ -879,7 +1090,10 @@ fun SettingsScreen(
         }
     }
 
-    if (showPhotoFitSheet && photoReady) {
+    if (showPhotoFitSheet &&
+        (photoReady ||
+            (style == ShapeStyle.LOCK_HOME && (lockMediaReady || homeMediaReady)))
+    ) {
         PhotoFitSheet(
             selectedFit = photoFit,
             onSelect = ::selectPhotoFit,
@@ -1039,6 +1253,210 @@ private fun AsciiPreviewCard(
                 style = MaterialTheme.typography.labelSmall,
                 fontSize = 9.sp,
                 color = Color.White.copy(alpha = 0.56f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LockHomePickerCard(
+    lockReady: Boolean,
+    homeReady: Boolean,
+    lockBusy: Boolean,
+    homeBusy: Boolean,
+    lockError: Boolean,
+    homeError: Boolean,
+    fit: PhotoFit,
+    transitionMs: Int,
+    onPickLock: () -> Unit,
+    onPickHome: () -> Unit,
+    onConfigureFit: () -> Unit,
+    onTransitionChange: (Int) -> Unit,
+    onTransitionFinished: () -> Unit
+) {
+    SettingsCard {
+        SectionLabel(stringResource(R.string.section_lock_home))
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = stringResource(R.string.lock_home_title),
+            style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.lock_home_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextMuted
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            LockHomeSlotCard(
+                modifier = Modifier.weight(1f),
+                title = stringResource(R.string.lock_home_lock),
+                icon = "◐",
+                ready = lockReady,
+                busy = lockBusy,
+                error = lockError,
+                onClick = onPickLock
+            )
+            LockHomeSlotCard(
+                modifier = Modifier.weight(1f),
+                title = stringResource(R.string.lock_home_home),
+                icon = "▣",
+                ready = homeReady,
+                busy = homeBusy,
+                error = homeError,
+                onClick = onPickHome
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF0B150D))
+                .border(1.dp, PanelBorder, RoundedCornerShape(12.dp))
+                .padding(start = 12.dp, top = 7.dp, bottom = 7.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.photo_fit_row_title),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AccentGreen
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource(
+                        R.string.photo_fit_current,
+                        stringResource(
+                            if (fit == PhotoFit.CONTAIN) {
+                                R.string.photo_fit_row_contain
+                            } else {
+                                R.string.photo_fit_row_cover
+                            }
+                        )
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextPrimary
+                )
+            }
+            TextButton(
+                onClick = onConfigureFit,
+                enabled = lockReady || homeReady
+            ) {
+                Text(
+                    text = stringResource(R.string.photo_fit_change),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (lockReady || homeReady) AccentGreen else TextMuted
+                )
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        LabelWithValue(
+            title = stringResource(R.string.lock_home_transition_title),
+            value = stringResource(
+                R.string.lock_home_transition_value,
+                String.format(Locale.getDefault(), "%.1f", transitionMs / 1000f)
+            )
+        )
+        Slider(
+            value = transitionMs / 1000f,
+            onValueChange = { onTransitionChange((it * 1000f).roundToInt()) },
+            onValueChangeFinished = onTransitionFinished,
+            valueRange = WallpaperSettings.MIN_LOCK_HOME_TRANSITION_MS / 1000f..
+                WallpaperSettings.MAX_LOCK_HOME_TRANSITION_MS / 1000f,
+            steps = 26,
+            colors = asciiSliderColors()
+        )
+        SliderLimits(
+            start = stringResource(R.string.lock_home_transition_fast),
+            end = stringResource(R.string.lock_home_transition_slow)
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = stringResource(R.string.lock_home_transition_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = TextMuted
+        )
+    }
+}
+
+@Composable
+private fun LockHomeSlotCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    icon: String,
+    ready: Boolean,
+    busy: Boolean,
+    error: Boolean,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(Color(0xFF0B150D))
+            .border(
+                1.dp,
+                if (error) MaterialTheme.colorScheme.error else PanelBorder,
+                shape
+            )
+            .padding(10.dp)
+    ) {
+        Text(
+            text = icon,
+            style = MaterialTheme.typography.headlineMedium,
+            color = if (ready) AccentGreen else TextMuted
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            color = TextPrimary
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = stringResource(
+                when {
+                    busy -> R.string.photo_processing_button
+                    error -> R.string.lock_home_slot_error
+                    ready -> R.string.lock_home_slot_ready
+                    else -> R.string.lock_home_slot_empty
+                }
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = when {
+                error -> MaterialTheme.colorScheme.error
+                ready -> AccentGreen
+                else -> TextMuted
+            }
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onClick,
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = 6.dp,
+                vertical = 7.dp
+            ),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF173B1E),
+                contentColor = AccentGreen,
+                disabledContainerColor = Panel,
+                disabledContentColor = TextMuted
+            )
+        ) {
+            Text(
+                text = stringResource(
+                    if (ready) R.string.lock_home_replace else R.string.lock_home_pick
+                ),
+                style = MaterialTheme.typography.labelSmall
             )
         }
     }
@@ -1246,9 +1664,12 @@ private fun previewStyleBadge(style: ShapeStyle): String = when (style) {
     ShapeStyle.BIG_CUBE -> "BIG CUBE ×1"
     ShapeStyle.DNA -> "DNA HELIX"
     ShapeStyle.BLACK_HOLE -> "EVENT HORIZON"
+    ShapeStyle.DUCK -> "ЕБАЛО УТИНОЕ / 3D"
+    ShapeStyle.DONUT -> "ПОНЧИК / 3D"
     ShapeStyle.FASTFETCH -> "FASTFETCH"
     ShapeStyle.ANDROID_LOGO -> "ANDROID ASCII"
     ShapeStyle.WAVES -> "WAVES / AUDIO"
+    ShapeStyle.LOCK_HOME -> "LOCK / HOME"
     ShapeStyle.PHOTO -> "MEDIA"
 }
 
@@ -1271,37 +1692,54 @@ private fun LiveAsciiPreview(
         lifecycleOwner,
         settings.targetFps,
         settings.style,
-        settings.photoAnimated
+        settings.photoRevision,
+        settings.photoAnimated,
+        settings.lockMediaRevision,
+        settings.lockMediaAnimated,
+        settings.homeMediaRevision,
+        settings.homeMediaAnimated
     ) {
-        // The preview does not need 120 fps to be useful. Capping it also
-        // avoids flooding Compose with state writes and heavy ASCII canvas
-        // work on the UI thread; the wallpaper engine keeps its own target.
-        // Fastfetch is static text, so a few refreshes per second are plenty.
+        // The preview honours the user's FPS preset, including 90/120. The
+        // filter now performs its downsampling in native Canvas code and the
+        // wallpaper scene is paused while settings are visible, so limiting
+        // the live preview to 30 fps would falsely make every preset look
+        // like a 30 fps wallpaper. Fastfetch and animated media still have
+        // their own natural refresh rates.
         if ((settings.style == ShapeStyle.PHOTO && !settings.photoAnimated) ||
-            settings.style == ShapeStyle.ANDROID_LOGO
+            settings.style == ShapeStyle.ANDROID_LOGO ||
+            (settings.style == ShapeStyle.LOCK_HOME &&
+                !settings.lockMediaAnimated && !settings.homeMediaAnimated)
         ) {
-            // A still photo and the static Android logo are complete after
-            // their first draw. Recomposition redraws them when a setting
-            // changes, so a permanent frame loop would only heat the phone.
+            // A still photo, a static Android logo and a static lock/home
+            // pair are complete after their first draw. Recomposition
+            // redraws them when a setting changes, so a permanent frame loop
+            // would only heat the phone.
             return@LaunchedEffect
         }
         val previewFps = when (settings.style) {
             ShapeStyle.FASTFETCH -> 4
-            // Animated media is cached at 12 fps; there is no point in
-            // running the preview at 45 fps.
             ShapeStyle.PHOTO -> 12
-            else -> settings.targetFps.coerceIn(1, 30)
+            ShapeStyle.LOCK_HOME -> 12
+            else -> settings.targetFps.coerceIn(1, 120)
         }
         val intervalNanos = 1_000_000_000L / previewFps
-        var lastAccepted = 0L
+        // Advance a fractional target instead of resetting the deadline to the
+        // accepted frame. On a 120 Hz display this produces the correct
+        // 30/45/60/90/120 cadence; resetting to "now" made 90 collapse to 60
+        // and 45 collapse to 40 because only whole display frames can be used.
+        var nextFrameAt = 0L
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
                 withFrameNanos { frameTime ->
-                    if (lastAccepted == 0L ||
-                        frameTime - lastAccepted >= intervalNanos
-                    ) {
-                        lastAccepted = frameTime
+                    if (nextFrameAt == 0L) nextFrameAt = frameTime
+                    if (frameTime >= nextFrameAt) {
                         frameTimeNanos = frameTime
+                        nextFrameAt += intervalNanos
+                        if (nextFrameAt <= frameTime) {
+                            // The UI fell behind (background resume or jank):
+                            // skip stale deadlines instead of drawing a burst.
+                            nextFrameAt = frameTime + intervalNanos
+                        }
                     }
                 }
             }
@@ -1962,6 +2400,12 @@ private fun RealSpectrumRow(
             ),
             style = MaterialTheme.typography.bodySmall,
             color = if (permissionDenied) Amber else TextMuted
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = stringResource(R.string.real_spectrum_echo_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = AccentGreen.copy(alpha = 0.78f)
         )
     }
 }

@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">ASCII Live Wallpaper</string>
     <string name="settings_title">ASCII-обои</string>
-    <string name="settings_subtitle">Восемь сцен, фото, GIF и видео: ASCII-арт, точечная матрица Nothing, fastfetch, ASCII-логотип Android и волны под музыку телефона с настраиваемым биением и шириной. Свои цвета и палитра для «Обои и стиль», без сети.</string>
+    <string name="settings_subtitle">Двенадцать сцен: ASCII-арт, точечная матрица Nothing, 3D-уточка и пончик, fastfetch, ASCII-логотип Android, три волны под музыку и две обои для блокировки и домашнего экрана. Свои цвета, прозрачность и палитра для «Обои и стиль», без сети.</string>
 
     <string name="preview_title">ПРЕДПРОСМОТР / В РЕАЛЬНОМ ВРЕМЕНИ</string>
     <string name="preview_live">LIVE</string>
@@ -21,16 +21,37 @@
     <string name="style_dna_detail">Двойная спираль · бесконечная диагональ</string>
     <string name="style_black_hole">Чёрная дыра</string>
     <string name="style_black_hole_detail">Аккреционный диск · фотонное кольцо</string>
+    <string name="style_duck">Ебало утиное</string>
+    <string name="style_duck_detail">Уточка 3D · крутится по вертикали, голова, клюв и глаза в объёме</string>
+    <string name="style_donut">Пончик</string>
+    <string name="style_donut_detail">3D-пончик с посыпкой · вращается по вертикали и горизонтали</string>
     <string name="style_fastfetch">Fastfetch</string>
     <string name="style_fastfetch_detail">ASCII-логотип Android и характеристики устройства — читаемым текстом</string>
     <string name="style_android_logo">Android</string>
     <string name="style_android_logo_detail">Тот же ASCII-логотип Android, крупным планом</string>
     <string name="style_waves">Волны / музыка</string>
     <string name="style_waves_detail">Три волны, настраиваемые биение и ширина, уровень заряда и эквалайзер под музыку</string>
+    <string name="style_lock_home">Две обои</string>
+    <string name="style_lock_home_detail">Своё видео или фото на экран блокировки и домашний экран · пиксельный переход при разблокировке</string>
     <string name="style_photo">Моё фото / видео</string>
     <string name="style_photo_detail">Фото, GIF или видео · цвет → ч/б → знаки</string>
 
     <string name="section_photo">02 / МЕДИА</string>
+    <string name="section_lock_home">02 / ЭКРАН БЛОКИРОВКИ И ДОМАШНИЙ</string>
+    <string name="lock_home_title">Слева — блокировка, справа — домашний экран</string>
+    <string name="lock_home_hint">Выберите своё фото, GIF или короткое видео для каждой стороны. При разблокировке картинка сначала сжимается до крупных пикселей, а затем раскрывается уже домашней.</string>
+    <string name="lock_home_lock">ЭКРАН БЛОКИРОВКИ</string>
+    <string name="lock_home_home">ДОМАШНИЙ ЭКРАН</string>
+    <string name="lock_home_slot_ready">выбрано</string>
+    <string name="lock_home_slot_empty">не выбрано</string>
+    <string name="lock_home_slot_error">ошибка</string>
+    <string name="lock_home_pick">Выбрать</string>
+    <string name="lock_home_replace">Заменить</string>
+    <string name="lock_home_transition_title">Скорость перехода</string>
+    <string name="lock_home_transition_value">%1$s с</string>
+    <string name="lock_home_transition_fast">быстрее</string>
+    <string name="lock_home_transition_slow">медленнее</string>
+    <string name="lock_home_transition_hint">Длительность пиксельного перехода после разблокировки. В середине картинка сжимается до четырёх колонок и затем собирается в домашнюю.</string>
     <string name="photo_title">Фото, GIF или видео</string>
     <string name="photo_ready">Медиа загружено и применено.</string>
     <string name="photo_missing">Фото или видео ещё не выбрано.</string>
@@ -88,17 +109,18 @@
     <string name="real_spectrum_denied">Разрешение не выдано — остаётся процедурная анимация.</string>
     <string name="real_spectrum_fallback">На части прошивок системный аудиомикшер закрыт; тогда автоматически работает резервная анимация.</string>
     <string name="real_spectrum_toggle_description">Включить или выключить реальный частотный спектр</string>
+    <string name="real_spectrum_echo_hint">При музыке все три волны остаются на экране: первая показывает спектр сейчас, вторая отстаёт на 0,2 с, третья — на 0,5 с.</string>
 
     <string name="fps_title">Частота кадров</string>
     <string name="fps_value">%1$d FPS</string>
-    <string name="fps_hint">Ограничение плавности и расхода батареи. 60 FPS — универсальный баланс.</string>
+    <string name="fps_hint">30, 45, 60, 90 или 120 FPS. Высокие значения заметны только на экране с такой частотой обновления; предпросмотр и обои теперь не ограничены скрытым лимитом 30 FPS.</string>
 
     <string name="section_lines">04 / ЛИНИИ</string>
     <string name="line_width_title">Толщина линий</string>
     <string name="line_width_value">%1$s×</string>
     <string name="line_width_thin">тонко</string>
     <string name="line_width_thick">толсто</string>
-    <string name="line_width_hint">Масштаб штрихов кубов, ДНК и чёрной дыры. Сплошные макароны не меняются.</string>
+    <string name="line_width_hint">Масштаб штрихов 3D-сцен, включая уточку и пончик. Сплошные макароны не меняются.</string>
 
     <string name="section_symbols_color">05 / СИМВОЛЫ И ЦВЕТ</string>
     <string name="section_symbols_color_photo">04 / СИМВОЛЫ И ЦВЕТ</string>
@@ -110,6 +132,11 @@
     <string name="symbol_nothing_detail">точки</string>
     <string name="glyph_color_title">Цвет символов</string>
     <string name="background_color_title">Цвет фона</string>
+    <string name="glyph_opacity_title">Прозрачность знаков и точек</string>
+    <string name="glyph_opacity_value">%1$d%%</string>
+    <string name="glyph_opacity_soft">прозрачнее</string>
+    <string name="glyph_opacity_solid">плотнее</string>
+    <string name="glyph_opacity_hint">Работает и для ASCII, и для точек Nothing, а также для фото и логотипов. 100% — полностью непрозрачные знаки.</string>
     <string name="color_custom_hint">Откройте палитру, чтобы выбрать любой оттенок, насыщенность и яркость. По умолчанию: белые символы на чёрном фоне.</string>
     <string name="color_system_hint">Цвет фона и акцента передаётся системному приложению «Обои и стиль». На Android 12+ совместимый лаунчер может использовать его для тематических иконок Material You, если эта функция включена в системе.</string>
     <string name="color_palette">Палитра</string>
@@ -125,7 +152,7 @@
     <string name="color_apply">Готово</string>
 
     <string name="unlock_title">Своя анимация на разблокировку</string>
-    <string name="unlock_detail">Макароны и кубы меняются местами, большой куб и ДНК на полсекунды раскручиваются, а чёрная дыра выпускает гравитационный импульс.</string>
+    <string name="unlock_detail">Макароны и кубы меняются местами, большой куб, ДНК, уточка и пончик на полсекунды раскручиваются, а чёрная дыра выпускает гравитационный импульс.</string>
     <string name="unlock_toggle_description">Включить или выключить анимацию на разблокировку</string>
 
     <string name="install_wallpaper">Установить обои</string>
@@ -133,6 +160,6 @@
     <string name="settings_live_note">Настройки применяются без перезапуска обоев.</string>
     <string name="wallpaper_picker_missing">Не удалось открыть выбор живых обоев на этом устройстве.</string>
 
-    <string name="wallpaper_description">Восемь сцен: 3D-фигуры, fastfetch, ASCII-логотип Android, волны под музыку с реальным спектром по желанию и фото/GIF/видео. ASCII-символы или точки Nothing, настраиваемые цвета и палитра для Material You.</string>
+    <string name="wallpaper_description">Двенадцать сцен: 3D-фигуры, уточка и пончик, fastfetch, ASCII-логотип Android, три волны под музыку с реальным спектром по желанию, фото/GIF/видео и отдельные обои для блокировки и домашнего экрана. ASCII-символы или точки Nothing, настраиваемые цвет, прозрачность и палитра для Material You.</string>
     <string name="wallpaper_author">ASCII Live Wallpaper</string>
 </resources>

@@ -32,21 +32,21 @@ object PhotoAsciiStore {
      */
     private const val MAX_SOURCE_SIDE = 1200
 
-    @Volatile
-    private var cachedRevision = Int.MIN_VALUE
+    private val cachedRevisions = IntArray(MediaSlot.entries.size) { Int.MIN_VALUE }
+    private val cachedBitmaps = arrayOfNulls<Bitmap>(MediaSlot.entries.size)
 
-    @Volatile
-    private var cachedBitmap: Bitmap? = null
+    fun file(context: Context, slot: MediaSlot = MediaSlot.MAIN): File =
+        File(context.filesDir, fileName(slot))
 
-    fun file(context: Context): File = File(context.filesDir, FILE_NAME)
-
-    fun hasPhoto(context: Context): Boolean = file(context).isFile
+    fun hasPhoto(context: Context, slot: MediaSlot = MediaSlot.MAIN): Boolean =
+        file(context, slot).isFile
 
     @Synchronized
-    fun clear(context: Context) {
-        cachedRevision = Int.MIN_VALUE
-        cachedBitmap = null
-        val target = file(context)
+    fun clear(context: Context, slot: MediaSlot = MediaSlot.MAIN) {
+        val index = slot.ordinal
+        cachedRevisions[index] = Int.MIN_VALUE
+        cachedBitmaps[index] = null
+        val target = file(context, slot)
         if (target.exists()) target.delete()
     }
 
@@ -55,11 +55,15 @@ object PhotoAsciiStore {
      * stores the result atomically. Returns a new revision on success.
      */
     @Synchronized
-    fun import(context: Context, uri: Uri): Int? {
+    fun import(
+        context: Context,
+        uri: Uri,
+        slot: MediaSlot = MediaSlot.MAIN
+    ): Int? {
         val decoded = decodeOriented(context, uri) ?: return null
         var grayscale: Bitmap? = null
-        val target = file(context)
-        val temporary = File(context.filesDir, "$FILE_NAME.tmp")
+        val target = file(context, slot)
+        val temporary = File(context.filesDir, "${fileName(slot)}.tmp")
 
         return try {
             grayscale = toGrayscale(decoded)
@@ -80,20 +84,22 @@ object PhotoAsciiStore {
                 return null
             }
 
-            // A still photo and an animated clip are mutually exclusive.
-            MediaAsciiStore.clear(context)
+            // A still photo and an animated clip are mutually exclusive in
+            // the same slot, but the other lock/home slot must stay intact.
+            MediaAsciiStore.clear(context, slot)
 
             val revision = (System.currentTimeMillis() and Int.MAX_VALUE.toLong())
                 .toInt()
                 .coerceAtLeast(1)
-            cachedRevision = revision
-            cachedBitmap = grayscale
+            val index = slot.ordinal
+            cachedRevisions[index] = revision
+            cachedBitmaps[index] = grayscale
             revision
         } catch (t: Throwable) {
             Log.w(TAG, "Photo import failed", t)
             null
         } finally {
-            if (grayscale !== cachedBitmap) grayscale?.recycle()
+            if (grayscale !== cachedBitmaps[slot.ordinal]) grayscale?.recycle()
             decoded.recycle()
             if (temporary.exists()) temporary.delete()
         }
@@ -105,10 +111,15 @@ object PhotoAsciiStore {
      * receive the same immutable bitmap, so it must never be recycled by them.
      */
     @Synchronized
-    fun load(context: Context, revision: Int): Bitmap? {
-        if (revision == cachedRevision) return cachedBitmap
+    fun load(
+        context: Context,
+        revision: Int,
+        slot: MediaSlot = MediaSlot.MAIN
+    ): Bitmap? {
+        val index = slot.ordinal
+        if (revision == cachedRevisions[index]) return cachedBitmaps[index]
 
-        val target = file(context)
+        val target = file(context, slot)
         val bitmap = if (target.isFile) {
             try {
                 BitmapFactory.decodeFile(target.absolutePath)
@@ -118,9 +129,15 @@ object PhotoAsciiStore {
         } else {
             null
         }
-        cachedRevision = revision
-        cachedBitmap = bitmap
+        cachedRevisions[index] = revision
+        cachedBitmaps[index] = bitmap
         return bitmap
+    }
+
+    private fun fileName(slot: MediaSlot): String = when (slot) {
+        MediaSlot.MAIN -> FILE_NAME
+        MediaSlot.LOCK -> "photo_source_lock.png"
+        MediaSlot.HOME -> "photo_source_home.png"
     }
 
     private fun decodeOriented(context: Context, uri: Uri): Bitmap? {

@@ -41,6 +41,9 @@ class AsciiRenderer(private val context: Context? = null) {
         private const val SPIN_BOOST_DECAY_SECONDS = 2.30f
         private const val DNA_SPEED_SCALE = 1.35f
         private const val BLACK_HOLE_SPEED_SCALE = 1.10f
+        private const val DUCK_SPEED_SCALE = 1.25f
+        private const val DONUT_X_SPEED_SCALE = 1.10f
+        private const val DONUT_Y_SPEED_SCALE = 0.78f
         private const val BLACK_HOLE_SPIN_BOOST = 3.0f
         private const val MAX_SCENE_WIDTH = 560
         private const val MAX_SCENE_HEIGHT = 1800
@@ -58,6 +61,8 @@ class AsciiRenderer(private val context: Context? = null) {
     private val cubeMesh = CubeMesh.create()
     private val dnaScene = DnaSceneRenderer()
     private val blackHoleScene = BlackHoleSceneRenderer()
+    private val duckScene = DuckSceneRenderer()
+    private val donutScene = DonutSceneRenderer()
     private val waveScene = WaveSceneRenderer()
     private val fastfetchRenderer = FastfetchRenderer(context)
     private val androidLogoRenderer = AndroidLogoRenderer(context)
@@ -76,6 +81,11 @@ class AsciiRenderer(private val context: Context? = null) {
     private var charging = false
     private var batteryPercent = 50
     private var mediaFrameSet: MediaAsciiStore.FrameSet? = null
+    private var lockMediaFrameSet: MediaAsciiStore.FrameSet? = null
+    private var homeMediaFrameSet: MediaAsciiStore.FrameSet? = null
+    private var locked = false
+    private var lockHomeTransitionStartNanos = 0L
+    private var lockHomeTransitionPending = false
 
     init {
         context?.let { ctx ->
@@ -119,6 +129,9 @@ class AsciiRenderer(private val context: Context? = null) {
     private var bigCubeAngle = 12f
     private var dnaSpin = 0f
     private var blackHoleSpin = 0f
+    private var duckSpin = 0f
+    private var donutSpinX = 34f
+    private var donutSpinY = 9f
     private var bigCubeOffsetX = 0f
     private var bigCubeOffsetY = 0f
     private var bigCubeFitWidth = -1
@@ -192,10 +205,19 @@ class AsciiRenderer(private val context: Context? = null) {
     private var faceColors = IntArray(0)
 
     fun updateSettings(newSettings: WallpaperSettings) {
-        if (newSettings === settings) return
+        // The service passes its current snapshot on every frame. Value
+        // equality avoids allocating a sanitized copy at 90/120 fps while
+        // still noticing every real settings/media revision change.
+        if (newSettings === settings || newSettings == settings) return
         val clean = newSettings.sanitized()
         val styleChanged = clean.style != settings.style
         val revisionChanged = clean.photoRevision != settings.photoRevision
+        val lockRevisionChanged =
+            clean.lockMediaRevision != settings.lockMediaRevision ||
+                clean.lockMediaAnimated != settings.lockMediaAnimated
+        val homeRevisionChanged =
+            clean.homeMediaRevision != settings.homeMediaRevision ||
+                clean.homeMediaAnimated != settings.homeMediaAnimated
 
         if (styleChanged) {
             unlockEffectStyle = null
@@ -228,6 +250,38 @@ class AsciiRenderer(private val context: Context? = null) {
                 null
             }
         }
+        if (lockRevisionChanged) {
+            lockMediaFrameSet = if (clean.lockMediaRevision != 0) {
+                context?.let {
+                    MediaAsciiStore.loadFrameSet(
+                        it,
+                        clean.lockMediaRevision,
+                        clean.lockMediaAnimated,
+                        MediaSlot.LOCK
+                    )
+                }
+            } else {
+                null
+            }
+        }
+        if (homeRevisionChanged) {
+            homeMediaFrameSet = if (clean.homeMediaRevision != 0) {
+                context?.let {
+                    MediaAsciiStore.loadFrameSet(
+                        it,
+                        clean.homeMediaRevision,
+                        clean.homeMediaAnimated,
+                        MediaSlot.HOME
+                    )
+                }
+            } else {
+                null
+            }
+        }
+        if (styleChanged) {
+            lockHomeTransitionStartNanos = 0L
+            lockHomeTransitionPending = false
+        }
     }
 
     /**
@@ -239,6 +293,22 @@ class AsciiRenderer(private val context: Context? = null) {
         charging = valueCharging
         batteryPercent = percent.coerceIn(0, 100)
     }
+
+    /**
+     * Tells the lock/home style which side is currently visible. Unlocking
+     * starts the pixelation bridge; locking cancels it immediately.
+     */
+    fun setLocked(value: Boolean) {
+        if (locked == value) return
+        locked = value
+        // The actual home/lock transition starts from onUnlock(), when the
+        // wallpaper is (or is about to become) visible. This avoids losing
+        // the whole animation while the surface is still hidden.
+        lockHomeTransitionStartNanos = 0L
+        lockHomeTransitionPending = !value && settings.style == ShapeStyle.LOCK_HOME
+    }
+
+    fun isLocked(): Boolean = locked
 
     /**
      * The wallpaper pauses capture when it is hidden or the screen turns off,
@@ -289,11 +359,44 @@ class AsciiRenderer(private val context: Context? = null) {
     fun animatedFrameRate(): Int =
         mediaFrameSet?.fps?.roundToInt()?.coerceIn(1, 30) ?: 12
 
+    /** True when either lock/home slot contains a multi-frame clip. */
+    fun hasAnimatedLockHomeMedia(): Boolean =
+        (lockMediaFrameSet?.frames?.size ?: 0) > 1 ||
+            (homeMediaFrameSet?.frames?.size ?: 0) > 1
+
+    /** Fastest playback rate among the two lock/home media slots. */
+    fun lockHomeAnimatedFrameRate(): Int {
+        val lockFps = lockMediaFrameSet?.fps ?: 1f
+        val homeFps = homeMediaFrameSet?.fps ?: 1f
+        return maxOf(lockFps, homeFps).roundToInt().coerceIn(1, 30)
+    }
+
+    fun isLockHomeTransitionActive(): Boolean = lockHomeTransitionActive()
+
     fun needsContinuousRendering(): Boolean {
         // The Android logo is deliberately static: the same fastfetch ASCII
         // artwork is drawn once and only redrawn for a setting/surface change.
         if (settings.style == ShapeStyle.ANDROID_LOGO) return false
-        return settings.style != ShapeStyle.PHOTO || mediaFrameSet != null
+        if (settings.style == ShapeStyle.PHOTO) return mediaFrameSet != null
+        if (settings.style == ShapeStyle.LOCK_HOME) {
+            if (!locked && lockHomeTransitionActive()) return true
+            val visibleSet = if (locked) {
+                lockMediaFrameSet ?: homeMediaFrameSet
+            } else {
+                homeMediaFrameSet ?: lockMediaFrameSet
+            }
+            return (visibleSet?.frames?.size ?: 0) > 1
+        }
+        return true
+    }
+
+    private fun lockHomeTransitionActive(): Boolean {
+        if (lockHomeTransitionStartNanos <= 0L) return false
+        val age = (System.nanoTime() - lockHomeTransitionStartNanos) /
+            1_000_000_000f
+        val duration = (settings.lockHomeTransitionMs / 1000f)
+            .coerceAtLeast(0.1f)
+        return age >= 0f && age < duration
     }
 
     /**
@@ -318,20 +421,43 @@ class AsciiRenderer(private val context: Context? = null) {
      */
     fun onUnlock(phase: Int, timeNanos: Long) {
         cornerPhase = phase and 1
-        if (settings.style == ShapeStyle.PHOTO ||
-            settings.style == ShapeStyle.ANDROID_LOGO
-        ) {
-            // Static styles should not rotate or sparkle. Their lock-screen
-            // toggle is hidden, but a stale broadcast must still be harmless.
-            unlockEffectStyle = null
-            unlockEffectStartNanos = 0L
-        } else if (settings.style.usesCornerSwap) {
-            unlockEffectStyle = null
-            unlockEffectStartNanos = 0L
-            startCornerAnimation(cornerPhase, timeNanos)
-        } else {
-            unlockEffectStyle = settings.style
-            unlockEffectStartNanos = timeNanos
+        when {
+            settings.style == ShapeStyle.LOCK_HOME -> {
+                // The lock/home animation is the transition itself; there is
+                // no spinning object to boost. Start it only if a real
+                // lock->unlock transition was observed, never on a plain
+                // screen wake when the device had no keyguard.
+                unlockEffectStyle = null
+                unlockEffectStartNanos = 0L
+                lockHomeTransitionStartNanos =
+                    if (lockHomeTransitionPending && !locked) {
+                        timeNanos
+                    } else {
+                        0L
+                    }
+                lockHomeTransitionPending = false
+            }
+
+            settings.style == ShapeStyle.PHOTO ||
+                settings.style == ShapeStyle.ANDROID_LOGO ||
+                settings.style == ShapeStyle.FASTFETCH -> {
+                // Static styles should not rotate or sparkle. Their
+                // lock-screen toggle is hidden, but a stale broadcast must
+                // still be harmless.
+                unlockEffectStyle = null
+                unlockEffectStartNanos = 0L
+            }
+
+            settings.style.usesCornerSwap -> {
+                unlockEffectStyle = null
+                unlockEffectStartNanos = 0L
+                startCornerAnimation(cornerPhase, timeNanos)
+            }
+
+            else -> {
+                unlockEffectStyle = settings.style
+                unlockEffectStartNanos = timeNanos
+            }
         }
     }
 
@@ -423,13 +549,18 @@ class AsciiRenderer(private val context: Context? = null) {
             )
         }
 
+        if (settings.style == ShapeStyle.LOCK_HOME) {
+            drawLockHome(canvas, width, height, timeNanos)
+            return
+        }
+
         if (settings.style == ShapeStyle.FASTFETCH) {
             fastfetchRenderer.draw(
                 canvas = canvas,
                 width = width,
                 height = height,
                 columns = settings.columns,
-                glyphColorArgb = settings.glyphColorArgb,
+                glyphColorArgb = effectiveGlyphColor(),
                 backgroundColorArgb = settings.backgroundColorArgb,
                 symbolStyle = settings.symbolStyle,
                 charging = charging
@@ -442,7 +573,7 @@ class AsciiRenderer(private val context: Context? = null) {
                 canvas = canvas,
                 width = width,
                 height = height,
-                glyphColorArgb = settings.glyphColorArgb,
+                glyphColorArgb = effectiveGlyphColor(),
                 backgroundColorArgb = settings.backgroundColorArgb,
                 symbolStyle = settings.symbolStyle
             )
@@ -461,10 +592,11 @@ class AsciiRenderer(private val context: Context? = null) {
                 viewWidth = width,
                 viewHeight = height,
                 requestedColumns = settings.columns,
-                glyphColorArgb = settings.glyphColorArgb,
+                glyphColorArgb = effectiveGlyphColor(),
                 backgroundColorArgb = settings.backgroundColorArgb,
                 fit = settings.photoFit,
-                symbolStyle = settings.symbolStyle
+                symbolStyle = settings.symbolStyle,
+                samplesPerAxis = if (settings.targetFps >= 90) 2 else 3
             )
             return
         }
@@ -517,20 +649,35 @@ class AsciiRenderer(private val context: Context? = null) {
      * meter is visible. The rest of the styles keep the selected colour.
      */
     private fun effectiveGlyphColor(): Int {
-        if (settings.style != ShapeStyle.WAVES) return settings.glyphColorArgb
-        val mix = waveScene.chargeColorMix()
-        if (mix <= 0.001f) return settings.glyphColorArgb
-        val base = settings.glyphColorArgb
-        val green = 0xFF6DFF82.toInt()
-        val inv = 1f - mix.coerceIn(0f, 1f)
-        val a = ((base ushr 24) and 0xFF) * inv + 255 * mix
-        val r = ((base ushr 16) and 0xFF) * inv + ((green ushr 16) and 0xFF) * mix
-        val g = ((base ushr 8) and 0xFF) * inv + ((green ushr 8) and 0xFF) * mix
-        val b = (base and 0xFF) * inv + (green and 0xFF) * mix
-        return (a.toInt().coerceIn(0, 255) shl 24) or
-            (r.toInt().coerceIn(0, 255) shl 16) or
-            (g.toInt().coerceIn(0, 255) shl 8) or
-            b.toInt().coerceIn(0, 255)
+        val base = if (settings.style != ShapeStyle.WAVES) {
+            settings.glyphColorArgb
+        } else {
+            val mix = waveScene.chargeColorMix()
+            if (mix <= 0.001f) {
+                settings.glyphColorArgb
+            } else {
+                val color = settings.glyphColorArgb
+                val green = 0xFF6DFF82.toInt()
+                val inv = 1f - mix.coerceIn(0f, 1f)
+                val a = ((color ushr 24) and 0xFF) * inv + 255 * mix
+                val r = ((color ushr 16) and 0xFF) * inv +
+                    ((green ushr 16) and 0xFF) * mix
+                val g = ((color ushr 8) and 0xFF) * inv +
+                    ((green ushr 8) and 0xFF) * mix
+                val b = (color and 0xFF) * inv + (green and 0xFF) * mix
+                (a.toInt().coerceIn(0, 255) shl 24) or
+                    (r.toInt().coerceIn(0, 255) shl 16) or
+                    (g.toInt().coerceIn(0, 255) shl 8) or
+                    b.toInt().coerceIn(0, 255)
+            }
+        }
+        val opacity = settings.glyphOpacityPercent.coerceIn(
+            WallpaperSettings.MIN_GLYPH_OPACITY_PERCENT,
+            WallpaperSettings.MAX_GLYPH_OPACITY_PERCENT
+        )
+        if (opacity >= 100) return base
+        val alpha = ((base ushr 24) and 0xFF) * opacity / 100
+        return (base and 0x00FFFFFF) or (alpha.coerceIn(0, 255) shl 24)
     }
 
     private fun advanceRotation(dt: Float, timeNanos: Long) {
@@ -563,6 +710,23 @@ class AsciiRenderer(private val context: Context? = null) {
                 )
             }
 
+            ShapeStyle.DUCK -> {
+                val boost = spinBoostMultiplier(timeNanos, ShapeStyle.DUCK)
+                duckSpin = wrapDegrees(
+                    duckSpin + speed * DUCK_SPEED_SCALE * dt * boost
+                )
+            }
+
+            ShapeStyle.DONUT -> {
+                val boost = spinBoostMultiplier(timeNanos, ShapeStyle.DONUT)
+                donutSpinX = wrapDegrees(
+                    donutSpinX + speed * DONUT_X_SPEED_SCALE * dt * boost
+                )
+                donutSpinY = wrapDegrees(
+                    donutSpinY + speed * DONUT_Y_SPEED_SCALE * dt * boost
+                )
+            }
+
             else -> Unit
         }
     }
@@ -591,7 +755,12 @@ class AsciiRenderer(private val context: Context? = null) {
     }
 
     private fun ensureScene(viewWidth: Int, viewHeight: Int, columns: Int) {
-        val targetWidth = (columns * SAMPLES_PER_CHAR)
+        // The final filter now performs one native filtered scale per frame,
+        // so two scene samples per cell are enough at 90/120 Hz. Keeping the
+        // old three-sample buffer at those presets wasted a third of the
+        // raster work and made 120 fps unreachable.
+        val samplesPerChar = if (settings.targetFps >= 90) 2 else SAMPLES_PER_CHAR
+        val targetWidth = (columns * samplesPerChar)
             .coerceIn(120, MAX_SCENE_WIDTH)
         val aspect = viewHeight.toFloat() / viewWidth.toFloat()
         val proportionalHeight = targetWidth * aspect
@@ -681,7 +850,34 @@ class AsciiRenderer(private val context: Context? = null) {
                 )
             }
 
-            ShapeStyle.ANDROID_LOGO, ShapeStyle.FASTFETCH -> Unit
+            ShapeStyle.DUCK -> {
+                duckScene.draw(
+                    canvas = canvas,
+                    width = width,
+                    height = height,
+                    columns = columns,
+                    spinDegrees = duckSpin,
+                    excitement = unlockAgeSeconds(timeNanos, ShapeStyle.DUCK)
+                        .let { if (it < 0f) 0f else (1f - it / 1.8f).coerceIn(0f, 1f) },
+                    lineWidthScale = settings.lineWidth
+                )
+            }
+
+            ShapeStyle.DONUT -> {
+                donutScene.draw(
+                    canvas = canvas,
+                    width = width,
+                    height = height,
+                    columns = columns,
+                    spinXDegrees = donutSpinX,
+                    spinYDegrees = donutSpinY,
+                    excitement = unlockAgeSeconds(timeNanos, ShapeStyle.DONUT)
+                        .let { if (it < 0f) 0f else (1f - it / 1.8f).coerceIn(0f, 1f) },
+                    lineWidthScale = settings.lineWidth
+                )
+            }
+
+            ShapeStyle.ANDROID_LOGO, ShapeStyle.FASTFETCH, ShapeStyle.LOCK_HOME -> Unit
 
             ShapeStyle.WAVES -> {
                 val waveSpeed = (settings.speedDegPerSec / 9f)
@@ -703,11 +899,81 @@ class AsciiRenderer(private val context: Context? = null) {
     }
 
     /**
-     * Draws the photo without distorting its aspect ratio. CONTAIN fits the
-     * complete image with letterbox bars, while COVER fills the surface and
-     * lets Canvas clip the overflowing edges. ASCII cells are not square, so
-     * the filter's row sizing preserves the same proportions afterwards.
+     * Lock/home style. While the keyguard is visible the lock slot is shown;
+     * after unlocking the image collapses to four columns and grows back as
+     * the home slot. Videos keep their own frame clocks.
      */
+    private fun drawLockHome(
+        canvas: Canvas,
+        width: Int,
+        height: Int,
+        timeNanos: Long
+    ) {
+        val lock = lockMediaFrameSet
+        val home = homeMediaFrameSet
+        if (lock == null && home == null) {
+            drawPhotoPlaceholder(canvas, width, height)
+            return
+        }
+
+        val duration = (settings.lockHomeTransitionMs / 1000f)
+            .coerceAtLeast(0.1f)
+        val age = if (lockHomeTransitionStartNanos > 0L) {
+            ((timeNanos - lockHomeTransitionStartNanos) / 1_000_000_000f)
+                .coerceAtLeast(0f)
+        } else {
+            duration
+        }
+        val transitioning = !locked && lockHomeTransitionStartNanos > 0L &&
+            age < duration
+        val phase = (age / duration).coerceIn(0f, 1f)
+        var frameSet = if (transitioning) {
+            if (phase < 0.5f) lock ?: home else home ?: lock
+        } else if (locked) {
+            lock ?: home
+        } else {
+            home ?: lock
+        }
+        if (frameSet == null || frameSet.frames.isEmpty()) {
+            drawPhotoPlaceholder(canvas, width, height)
+            return
+        }
+
+        var columns = settings.columns
+        if (transitioning) {
+            val half = if (phase < 0.5f) phase * 2f else (phase - 0.5f) * 2f
+            val eased = half * half * (3f - 2f * half)
+            columns = if (phase < 0.5f) {
+                (settings.columns + (AsciiFilter.MIN_RENDER_COLUMNS -
+                    settings.columns) * eased).roundToInt()
+            } else {
+                (AsciiFilter.MIN_RENDER_COLUMNS + (settings.columns -
+                    AsciiFilter.MIN_RENDER_COLUMNS) * eased).roundToInt()
+            }
+            frameSet = if (phase < 0.5f) lock ?: home else home ?: lock
+        }
+        val set = frameSet ?: return
+        val frameIndex = ((elapsedSeconds * set.fps).toInt() %
+            set.frames.size.coerceAtLeast(1))
+        asciiFilter.drawGray(
+            canvas = canvas,
+            pixels = set.frames[frameIndex],
+            sourceWidth = set.width,
+            sourceHeight = set.height,
+            viewWidth = width,
+            viewHeight = height,
+            requestedColumns = columns.coerceIn(
+                AsciiFilter.MIN_RENDER_COLUMNS,
+                settings.columns
+            ),
+            glyphColorArgb = effectiveGlyphColor(),
+            backgroundColorArgb = settings.backgroundColorArgb,
+            fit = settings.photoFit,
+            symbolStyle = settings.symbolStyle,
+            samplesPerAxis = if (settings.targetFps >= 90) 2 else 3
+        )
+    }
+
     private fun drawPhoto(canvas: Canvas, width: Int, height: Int) {
         val bitmap = photoBitmap
         if (bitmap == null || bitmap.isRecycled) {

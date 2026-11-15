@@ -14,8 +14,10 @@ import kotlin.math.sin
  *  - idle: three ribbons leave one shared point on the left edge, fan out
  *    across the lower three quarters of the screen, and return to one shared
  *    point on the right edge;
- *  - phone music: the three ribbons converge into a single spectrum-shaped
- *    wave. There is no separate equalizer object;
+ *  - phone music: the three ribbons remain separate and draw the same
+ *    equalizer three times, at the live moment and with 200 ms / 500 ms
+ *    echoes. This makes the motion visibly follow the track instead of
+ *    collapsing into one synthetic-looking line;
  *  - charger connected: the ribbons flatten into one horizontal line whose
  *    height is the battery percentage (top = 100%, bottom = 0%). Everything
  *    below the line is filled green while the state fades in/out.
@@ -31,8 +33,17 @@ class WaveSceneRenderer {
         private const val TWO_PI = PI.toFloat() * 2f
         private const val WAVE_REGION_TOP = 0.25f
         private const val WAVE_ANCHOR_Y = 0.625f
-        private const val MUSIC_WAVE_HEIGHT = 0.34f
+        private const val MUSIC_WAVE_HEIGHT = 0.27f
+        // The three ribbons keep a little vertical fan during music so the
+        // delayed echoes stay readable instead of becoming one thick stroke.
+        private const val MUSIC_ECHO_SPREAD = 0.55f
+        private const val HISTORY_CAPACITY = 96
         private const val BATTERY_FILL_BRIGHTNESS = 0.74f
+        private val ECHO_DELAY_SECONDS = floatArrayOf(0f, 0.2f, 0.5f)
+        // During music the live ribbon is the clearest one; older echoes fade
+        // back instead of looking like the primary line.
+        private val MUSIC_BRIGHTNESS = floatArrayOf(1.00f, 0.68f, 0.44f)
+        private val MUSIC_STROKE_SCALE = floatArrayOf(1.14f, 0.92f, 0.72f)
     }
 
     private val wavePaint = Paint().apply {
@@ -53,7 +64,17 @@ class WaveSceneRenderer {
     private val waveFrequencies = floatArrayOf(0.88f, 1.02f, 1.16f)
     private val waveBrightness = floatArrayOf(0.58f, 0.78f, 1.00f)
 
+    // One history sample per rendered frame. The current ribbon reads the
+    // newest frame, the second reads 200 ms ago and the third 500 ms ago.
+    private val historyLevels = Array(HISTORY_CAPACITY) { FloatArray(BAND_COUNT) }
+    private val historyTimes = FloatArray(HISTORY_CAPACITY)
+    private var historyHead = 0
+    private var historyCount = 0
+    private var historyClock = 0f
+    private val echoLevels = Array(3) { FloatArray(BAND_COUNT) }
+
     private var musicAmount = 0f
+    private var wasMusicActive = false
     private var batteryAmount = 0f
     private var batteryLevel = 0.5f
     private var batteryTarget = 0.5f
@@ -69,7 +90,10 @@ class WaveSceneRenderer {
         batteryLevel = batteryTarget
         batteryAmount = if (charging) 1f else 0f
         musicAmount = 0f
+        wasMusicActive = false
         smoothedLevels.fill(0f)
+        clearHistory()
+        for (levels in echoLevels) levels.fill(0f)
     }
 
     fun advance(
@@ -97,6 +121,11 @@ class WaveSceneRenderer {
         musicAmount += (targetMusic - musicAmount) *
             (dt * 2.6f).coerceIn(0f, 1f)
         if (musicAmount < 0.001f) musicAmount = 0f
+
+        // Do not play stale idle samples when a new track starts. The first
+        // three echoes are identical and then separate naturally.
+        if (musicActive && !wasMusicActive) clearHistory()
+        wasMusicActive = musicActive
 
         val energy = if (musicActive && !charging) {
             (0.32f + 0.68f * musicVolume.coerceIn(0f, 1f)).coerceIn(0.32f, 1f)
@@ -134,6 +163,73 @@ class WaveSceneRenderer {
             smoothedLevels[band] += (target - current) *
                 (dt * attack).coerceIn(0f, 1f)
         }
+
+        appendHistory(dt)
+        smoothedLevels.copyInto(echoLevels[0])
+        sampleDelayed(ECHO_DELAY_SECONDS[1], echoLevels[1])
+        sampleDelayed(ECHO_DELAY_SECONDS[2], echoLevels[2])
+    }
+
+    private fun clearHistory() {
+        historyHead = 0
+        historyCount = 0
+        historyClock = 0f
+    }
+
+    private fun appendHistory(dt: Float) {
+        if (historyCount > 0 && dt <= 0f) return
+        historyClock += dt.coerceIn(0f, 0.1f)
+        smoothedLevels.copyInto(historyLevels[historyHead])
+        historyTimes[historyHead] = historyClock
+        historyHead = (historyHead + 1) % HISTORY_CAPACITY
+        if (historyCount < HISTORY_CAPACITY) historyCount++
+    }
+
+    /**
+     * Fetches a past spectrum snapshot. Linear interpolation between adjacent
+     * frames keeps the delay exact even when the wallpaper runs at 30, 60 or
+     * 120 fps. Before enough history exists, the oldest sample is repeated.
+     */
+    private fun sampleDelayed(delaySeconds: Float, destination: FloatArray) {
+        if (delaySeconds <= 0f || historyCount == 0) {
+            smoothedLevels.copyInto(destination)
+            return
+        }
+        val targetTime = historyClock - delaySeconds
+        var newer = -1
+        var older = -1
+        for (step in 0 until historyCount) {
+            val index = (historyHead - 1 - step + HISTORY_CAPACITY) %
+                HISTORY_CAPACITY
+            if (historyTimes[index] <= targetTime) {
+                older = index
+                break
+            }
+            newer = index
+        }
+        if (older < 0) {
+            // The requested echo is older than the available history.
+            older = (historyHead - historyCount + HISTORY_CAPACITY) %
+                HISTORY_CAPACITY
+            historyLevels[older].copyInto(destination)
+            return
+        }
+        if (newer < 0) {
+            historyLevels[older].copyInto(destination)
+            return
+        }
+        val span = historyTimes[newer] - historyTimes[older]
+        val mix = if (span > 0.000001f) {
+            ((targetTime - historyTimes[older]) / span).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        val oldLevels = historyLevels[older]
+        val newLevels = historyLevels[newer]
+        for (band in 0 until BAND_COUNT) {
+            destination[band] = oldLevels[band] +
+                (newLevels[band] - oldLevels[band]) * mix
+        }
     }
 
     /** 0 = normal waves, 1 = green battery meter. */
@@ -164,13 +260,6 @@ class WaveSceneRenderer {
         val regionTop = height * WAVE_REGION_TOP
         val regionBottom = height * 0.998f
 
-        var bass = 0f
-        for (i in 0..4) bass += smoothedLevels[i]
-        bass /= 5f
-        var treble = 0f
-        for (i in 7..11) treble += smoothedLevels[i]
-        treble /= 5f
-
         // The battery fill is drawn before the line so the top edge stays
         // crisp. It reaches all the way to the bottom edge of the screen.
         if (batteryAmount > 0.001f) {
@@ -188,9 +277,22 @@ class WaveSceneRenderer {
         // both geometry values so the ribbons never clip at the region edges.
         val beatScale = idleAmplitudeScale.coerceIn(0.2f, 2f)
         val spreadScale = idleSpreadScale.coerceIn(0.5f, 1.5f)
-        waveAmplitudes[0] = height * (0.064f + 0.019f * bass) * beatScale
-        waveAmplitudes[1] = height * (0.076f + 0.022f * treble) * beatScale
-        waveAmplitudes[2] = height * (0.068f + 0.020f * bass) * beatScale
+        for (layer in 0 until 3) {
+            val levels = echoLevels[layer]
+            var layerBass = 0f
+            for (i in 0..4) layerBass += levels[i]
+            layerBass /= 5f
+            var layerTreble = 0f
+            for (i in 7..11) layerTreble += levels[i]
+            layerTreble /= 5f
+            waveAmplitudes[layer] = height * (
+                when (layer) {
+                    0 -> 0.064f + 0.019f * layerBass
+                    1 -> 0.076f + 0.022f * layerTreble
+                    else -> 0.068f + 0.020f * layerBass
+                }
+                ) * beatScale
+        }
 
         val availableVertical = minOf(
             anchorY - regionTop,
@@ -206,12 +308,34 @@ class WaveSceneRenderer {
         }
         fit = fit.coerceIn(0f, 1f)
 
+        // The music echo fan gets its own fit. All three spectrum lines can
+        // reach the peak at the same time, so the tallest possible line and
+        // the widest offset must both fit inside the wave region.
+        var musicRequired = 0f
+        for (layer in 0 until 3) {
+            musicRequired = maxOf(
+                musicRequired,
+                abs(waveOffsets[layer]) * height * spreadScale *
+                    MUSIC_ECHO_SPREAD +
+                    height * MUSIC_WAVE_HEIGHT
+            )
+        }
+        val musicFit = if (musicRequired > availableVertical && musicRequired > 0f) {
+            (availableVertical / musicRequired).coerceIn(0f, 1f)
+        } else {
+            1f
+        }
+
         val batteryY = height * (1f - batteryLevel)
+
         for (layer in 0 until 3) {
             wavePath.rewind()
+            val levels = echoLevels[layer]
             val amplitude = waveAmplitudes[layer] * fit
             val frequency = waveFrequencies[layer]
             val offset = waveOffsets[layer] * height * spreadScale * fit
+            val musicOffset = waveOffsets[layer] * height * spreadScale *
+                MUSIC_ECHO_SPREAD * musicFit
             val phase = timeSeconds * (0.95f + layer * 0.18f) + layer * 1.7f
 
             for (i in 0..samples) {
@@ -227,13 +351,15 @@ class WaveSceneRenderer {
                         amplitude * 0.30f
                     ) * edgeEnvelope
 
-                val spectrum = sampleSpectrum(t)
-                val mergedY = anchorY -
-                    spectrum * height * MUSIC_WAVE_HEIGHT * edgeEnvelope
+                val spectrum = sampleSpectrum(t, levels)
+                val musicY = anchorY + (
+                    musicOffset -
+                        spectrum * height * MUSIC_WAVE_HEIGHT * musicFit
+                    ) * edgeEnvelope
 
                 var y = idleY.coerceIn(regionTop, regionBottom)
                 if (musicAmount > 0f) {
-                    y += (mergedY.coerceIn(regionTop, regionBottom) - y) *
+                    y += (musicY.coerceIn(regionTop, regionBottom) - y) *
                         musicAmount
                 }
                 if (batteryAmount > 0f) {
@@ -242,11 +368,17 @@ class WaveSceneRenderer {
                 if (i == 0) wavePath.moveTo(x, y) else wavePath.lineTo(x, y)
             }
 
-            val layerBoost = 1f + musicAmount * 0.18f
+            val layerBoost = 1f + musicAmount * 0.10f
+            val brightness = waveBrightness[layer] +
+                (MUSIC_BRIGHTNESS[layer] - waveBrightness[layer]) *
+                musicAmount
+            val idleStroke = 0.85f + layer * 0.20f
+            val strokeScale = idleStroke +
+                (MUSIC_STROKE_SCALE[layer] - idleStroke) * musicAmount
             wavePaint.color = SceneColor.gray(
-                (waveBrightness[layer] * layerBoost).coerceIn(0f, 1f)
+                (brightness * layerBoost).coerceIn(0f, 1f)
             )
-            wavePaint.strokeWidth = stroke * (0.85f + layer * 0.20f)
+            wavePaint.strokeWidth = stroke * strokeScale
             canvas.drawPath(wavePath, wavePaint)
         }
     }
@@ -256,13 +388,13 @@ class WaveSceneRenderer {
      * a smoothstep weight creates rounded peaks instead of visible steps, so
      * the result still reads as one wave rather than a bar chart.
      */
-    private fun sampleSpectrum(t: Float): Float {
+    private fun sampleSpectrum(t: Float, levels: FloatArray): Float {
         val position = t.coerceIn(0f, 1f) * (BAND_COUNT - 1)
         val lower = position.toInt().coerceIn(0, BAND_COUNT - 1)
         val upper = (lower + 1).coerceAtMost(BAND_COUNT - 1)
         val fraction = position - lower
         val smooth = fraction * fraction * (3f - 2f * fraction)
-        return smoothedLevels[lower] * (1f - smooth) +
-            smoothedLevels[upper] * smooth
+        return levels[lower] * (1f - smooth) +
+            levels[upper] * smooth
     }
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.util.Log
 import kotlin.math.min
@@ -27,6 +28,7 @@ import kotlin.math.sqrt
 class AsciiFilter(context: Context? = null) {
     companion object {
         const val RAMP = " .:-=+*#%@"
+        const val MIN_RENDER_COLUMNS = 4
         private const val CHAR_ASPECT = 1.58f
         private const val DOT_LEVELS = 10
         private const val TAG = "AsciiFilter"
@@ -67,6 +69,21 @@ class AsciiFilter(context: Context? = null) {
     private var rowHasInk = BooleanArray(0)
     private var glyphPositions = FloatArray(0)
     private var scenePixels = IntArray(0)
+
+    // The final ASCII/Nothing grid is one pixel per character cell. Scaling
+    // the scene into this tiny bitmap lets Canvas do the expensive box filter
+    // in native code instead of walking every offscreen pixel in Kotlin on
+    // each frame. At 120 fps this is the difference between a slideshow and
+    // a smooth animation on a phone.
+    private var gridBitmap: Bitmap? = null
+    private var gridCanvas: Canvas? = null
+    private var gridPixels = IntArray(0)
+    private val gridRect = Rect()
+    private val gridPaint = Paint().apply {
+        isFilterBitmap = true
+        isAntiAlias = false
+        isDither = false
+    }
 
     private val dotPositions = Array(DOT_LEVELS) { FloatArray(0) }
     private val dotCounts = IntArray(DOT_LEVELS)
@@ -123,7 +140,7 @@ class AsciiFilter(context: Context? = null) {
         val width = viewWidth.coerceAtLeast(1)
         val height = viewHeight.coerceAtLeast(1)
         val cols = requestedColumns.coerceIn(
-            WallpaperSettings.MIN_COLUMNS,
+            MIN_RENDER_COLUMNS,
             WallpaperSettings.MAX_COLUMNS
         )
         if (width == configuredWidth &&
@@ -159,16 +176,23 @@ class AsciiFilter(context: Context? = null) {
         val referenceAdvance = (referenceWidth / columns).coerceAtLeast(0.001f)
         blockScaleX = width / (referenceAdvance * columns)
 
-        glyphPositions = FloatArray(columns * 2)
+        if (glyphPositions.size < columns * 2) {
+            glyphPositions = FloatArray(columns * 2)
+        }
         for (col in 0 until columns) {
             glyphPositions[col * 2] = col * referenceAdvance
         }
 
         val cells = columns * rows
-        charBuffer = CharArray(cells)
-        rowHasInk = BooleanArray(rows)
-        // Dot buffers are allocated lazily in drawNothingGrid so the default
-        // ASCII mode does not reserve several megabytes it will never use.
+        // Keep the largest buffers while the lock/home transition animates the
+        // column count every frame. Reallocating the whole grid 120 times a
+        // second would create avoidable GC pauses exactly during the unlock.
+        if (charBuffer.size < cells) charBuffer = CharArray(cells)
+        if (rowHasInk.size < rows) rowHasInk = BooleanArray(rows)
+        gridRect.set(0, 0, columns, rows)
+        // Dot buffers and the native downsampling target are allocated lazily
+        // by their respective draw paths. In particular, drawGray() must not
+        // allocate a grid bitmap on every frame of the lock/home transition.
     }
 
     fun draw(
@@ -187,19 +211,44 @@ class AsciiFilter(context: Context? = null) {
 
         if (scene.isRecycled || scene.width <= 0 || scene.height <= 0) return
 
-        val sceneWidth = scene.width
-        val sceneHeight = scene.height
-        val pixelCount = sceneWidth * sceneHeight
-        if (scenePixels.size < pixelCount) scenePixels = IntArray(pixelCount)
-        scene.getPixels(scenePixels, 0, sceneWidth, 0, 0, sceneWidth, sceneHeight)
+        val currentGrid = gridBitmap
+        if (currentGrid == null || gridCanvas == null ||
+            currentGrid.isRecycled ||
+            currentGrid.width < columns || currentGrid.height < rows
+        ) {
+            // Grow only. The lock/home transition changes the column count
+            // every frame, and recycling/allocating a bitmap 120 times a
+            // second would stutter the very animation it is drawing.
+            val capacityWidth = maxOf(columns, currentGrid?.width ?: 0)
+            val capacityHeight = maxOf(rows, currentGrid?.height ?: 0)
+            currentGrid?.recycle()
+            gridBitmap = Bitmap.createBitmap(
+                capacityWidth,
+                capacityHeight,
+                Bitmap.Config.ARGB_8888
+            )
+            gridCanvas = Canvas(gridBitmap!!)
+        }
+        val grid = gridBitmap ?: return
+        val gridCanvas = gridCanvas ?: return
+        val cells = columns * rows
+        if (gridPixels.size < cells) gridPixels = IntArray(cells)
+
+        // A single filtered native scale produces one luminance sample per
+        // ASCII cell. The old Kotlin loop averaged every offscreen pixel on
+        // every frame, which made 90/120 fps presets impossible.
+        gridCanvas.drawColor(0xFF000000.toInt())
+        gridCanvas.drawBitmap(scene, null, gridRect, gridPaint)
+        grid.getPixels(gridPixels, 0, columns, 0, 0, columns, rows)
+        scenePixels = gridPixels
 
         if (symbolStyle == SymbolStyle.NOTHING) {
-            drawNothingGrid(canvas, sceneWidth, sceneHeight, glyphColorArgb, photoRamp)
+            drawNothingGrid(canvas, columns, rows, glyphColorArgb, photoRamp)
         } else {
             drawAsciiGrid(
                 canvas = canvas,
-                sceneWidth = sceneWidth,
-                sceneHeight = sceneHeight,
+                sceneWidth = columns,
+                sceneHeight = rows,
                 glyphColorArgb = glyphColorArgb,
                 photoRamp = photoRamp
             )
@@ -224,7 +273,8 @@ class AsciiFilter(context: Context? = null) {
         glyphColorArgb: Int,
         backgroundColorArgb: Int,
         fit: PhotoFit,
-        symbolStyle: SymbolStyle
+        symbolStyle: SymbolStyle,
+        samplesPerAxis: Int = 3
     ) {
         configure(viewWidth, viewHeight, requestedColumns)
         canvas.drawColor(backgroundColorArgb)
@@ -247,15 +297,16 @@ class AsciiFilter(context: Context? = null) {
         val top = (viewHeight - drawHeight) * 0.5f
         val invScale = 1f / scale
 
+        val samples = samplesPerAxis.coerceIn(1, 3)
         if (symbolStyle == SymbolStyle.NOTHING) {
             drawNothingGray(
                 canvas, pixels, sourceWidth, sourceHeight,
-                left, top, invScale, glyphColorArgb
+                left, top, invScale, glyphColorArgb, samples
             )
         } else {
             drawAsciiGray(
                 canvas, pixels, sourceWidth, sourceHeight,
-                left, top, invScale, glyphColorArgb
+                left, top, invScale, glyphColorArgb, samples
             )
         }
     }
@@ -268,19 +319,20 @@ class AsciiFilter(context: Context? = null) {
         top: Float,
         invScale: Float,
         cellLeft: Float,
-        cellTop: Float
+        cellTop: Float,
+        samplesPerAxis: Int
     ): Int {
         var sum = 0
         var samples = 0
-        for (sy in 0 until 3) {
-            val viewY = cellTop + cellHeight * (sy + 0.5f) / 3f
+        for (sy in 0 until samplesPerAxis) {
+            val viewY = cellTop + cellHeight * (sy + 0.5f) / samplesPerAxis
             val sourceY = ((viewY - top) * invScale).toInt()
             if (sourceY < 0 || sourceY >= sourceHeight) {
-                samples += 3
+                samples += samplesPerAxis
                 continue
             }
-            for (sx in 0 until 3) {
-                val viewX = cellLeft + cellWidth * (sx + 0.5f) / 3f
+            for (sx in 0 until samplesPerAxis) {
+                val viewX = cellLeft + cellWidth * (sx + 0.5f) / samplesPerAxis
                 val sourceX = ((viewX - left) * invScale).toInt()
                 if (sourceX in 0 until sourceWidth) {
                     sum += pixels[sourceY * sourceWidth + sourceX].toInt() and 0xFF
@@ -300,7 +352,8 @@ class AsciiFilter(context: Context? = null) {
         left: Float,
         top: Float,
         invScale: Float,
-        glyphColorArgb: Int
+        glyphColorArgb: Int,
+        samplesPerAxis: Int
     ) {
         var writeIndex = 0
         for (row in 0 until rows) {
@@ -309,7 +362,7 @@ class AsciiFilter(context: Context? = null) {
             for (col in 0 until columns) {
                 val average = averageGray(
                     pixels, sourceWidth, sourceHeight, left, top, invScale,
-                    col * cellWidth, cellTop
+                    col * cellWidth, cellTop, samplesPerAxis
                 )
                 val ch = photoRampLut[average.coerceIn(0, 255)]
                 charBuffer[writeIndex++] = ch
@@ -345,7 +398,8 @@ class AsciiFilter(context: Context? = null) {
         left: Float,
         top: Float,
         invScale: Float,
-        glyphColorArgb: Int
+        glyphColorArgb: Int,
+        samplesPerAxis: Int
     ) {
         ensureDotBuffers(columns * rows)
         for (row in 0 until rows) {
@@ -354,7 +408,7 @@ class AsciiFilter(context: Context? = null) {
             for (col in 0 until columns) {
                 val average = averageGray(
                     pixels, sourceWidth, sourceHeight, left, top, invScale,
-                    col * cellWidth, cellTop
+                    col * cellWidth, cellTop, samplesPerAxis
                 )
                 val level = photoDotLut[average.coerceIn(0, 255)].toInt()
                 if (level == 0) continue
@@ -395,25 +449,28 @@ class AsciiFilter(context: Context? = null) {
                 .coerceAtMost(sceneHeight)
 
             for (col in 0 until columns) {
-                val x0 = col * sceneWidth / columns
-                val x1 = ((col + 1) * sceneWidth / columns).coerceAtLeast(x0 + 1)
-                    .coerceAtMost(sceneWidth)
-
-                var sum = 0
-                var samples = 0
-                for (y in y0 until y1) {
-                    var index = y * sceneWidth + x0
-                    for (x in x0 until x1) {
-                        val rgb = scenePixels[index++]
-                        val r = (rgb ushr 16) and 0xFF
-                        val g = (rgb ushr 8) and 0xFF
-                        val b = rgb and 0xFF
-                        sum += (r * 54 + g * 183 + b * 19) ushr 8
-                        samples++
+                val average = if (sceneWidth == columns && sceneHeight == rows) {
+                    scenePixels[row * columns + col]
+                } else {
+                    val x0 = col * sceneWidth / columns
+                    val x1 = ((col + 1) * sceneWidth / columns)
+                        .coerceAtLeast(x0 + 1)
+                        .coerceAtMost(sceneWidth)
+                    var sum = 0
+                    var samples = 0
+                    for (y in y0 until y1) {
+                        var index = y * sceneWidth + x0
+                        for (x in x0 until x1) {
+                            val rgb = scenePixels[index++]
+                            val r = (rgb ushr 16) and 0xFF
+                            val g = (rgb ushr 8) and 0xFF
+                            val b = rgb and 0xFF
+                            sum += (r * 54 + g * 183 + b * 19) ushr 8
+                            samples++
+                        }
                     }
+                    if (samples == 0) 0 else sum / samples
                 }
-
-                val average = if (samples == 0) 0 else sum / samples
                 val ch = lut[average.coerceIn(0, 255)]
                 charBuffer[writeIndex++] = ch
                 if (ch != ' ') rowHasInk[row] = true
@@ -463,25 +520,28 @@ class AsciiFilter(context: Context? = null) {
             val centerY = (row + 0.5f) * cellHeight
 
             for (col in 0 until columns) {
-                val x0 = col * sceneWidth / columns
-                val x1 = ((col + 1) * sceneWidth / columns).coerceAtLeast(x0 + 1)
-                    .coerceAtMost(sceneWidth)
-
-                var sum = 0
-                var samples = 0
-                for (y in y0 until y1) {
-                    var index = y * sceneWidth + x0
-                    for (x in x0 until x1) {
-                        val rgb = scenePixels[index++]
-                        val r = (rgb ushr 16) and 0xFF
-                        val g = (rgb ushr 8) and 0xFF
-                        val b = rgb and 0xFF
-                        sum += (r * 54 + g * 183 + b * 19) ushr 8
-                        samples++
+                val average = if (sceneWidth == columns && sceneHeight == rows) {
+                    scenePixels[row * columns + col]
+                } else {
+                    val x0 = col * sceneWidth / columns
+                    val x1 = ((col + 1) * sceneWidth / columns)
+                        .coerceAtLeast(x0 + 1)
+                        .coerceAtMost(sceneWidth)
+                    var sum = 0
+                    var samples = 0
+                    for (y in y0 until y1) {
+                        var index = y * sceneWidth + x0
+                        for (x in x0 until x1) {
+                            val rgb = scenePixels[index++]
+                            val r = (rgb ushr 16) and 0xFF
+                            val g = (rgb ushr 8) and 0xFF
+                            val b = rgb and 0xFF
+                            sum += (r * 54 + g * 183 + b * 19) ushr 8
+                            samples++
+                        }
                     }
+                    if (samples == 0) 0 else sum / samples
                 }
-
-                val average = if (samples == 0) 0 else sum / samples
                 val level = lut[average.coerceIn(0, 255)].toInt()
                 if (level == 0) continue
 

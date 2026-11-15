@@ -18,6 +18,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.service.wallpaper.WallpaperService
 import android.util.Log
+import android.view.Surface
 import android.view.SurfaceHolder
 import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
@@ -108,6 +109,9 @@ class AsciiWallpaperService : WallpaperService() {
                     scheduleNextFrame()
                 } else {
                     nextFrameAtMillis = 0L
+                    // A static scene/lock transition has just finished. Drop
+                    // any temporary high-refresh hint so the panel can idle.
+                    applySurfaceFrameRate()
                 }
             }
         }
@@ -122,7 +126,22 @@ class AsciiWallpaperService : WallpaperService() {
             val keyguard = appContext.getSystemService(Context.KEYGUARD_SERVICE)
                 as? KeyguardManager
             if (keyguard == null || !keyguard.isKeyguardLocked) {
+                updateLockedState(false)
                 requestUnlockAnimation()
+            }
+        }
+
+        private fun updateLockedState(locked: Boolean) {
+            renderHandler.post { renderer.setLocked(locked) }
+        }
+
+        private fun keyguardLocked(): Boolean {
+            val keyguard = appContext.getSystemService(Context.KEYGUARD_SERVICE)
+                as? KeyguardManager ?: return false
+            return try {
+                keyguard.isKeyguardLocked
+            } catch (_: Throwable) {
+                false
             }
         }
 
@@ -133,6 +152,7 @@ class AsciiWallpaperService : WallpaperService() {
                         screenOn = true
                         userPresentSeen = true
                         mainHandler.removeCallbacks(screenOnFallback)
+                        updateLockedState(false)
                         startRenderingIfPossible()
                         requestUnlockAnimation()
                     }
@@ -140,6 +160,7 @@ class AsciiWallpaperService : WallpaperService() {
                     Intent.ACTION_SCREEN_ON -> {
                         screenOn = true
                         userPresentSeen = false
+                        updateLockedState(keyguardLocked())
                         mainHandler.removeCallbacks(screenOnFallback)
                         mainHandler.postDelayed(screenOnFallback, 1_500L)
                         startRenderingIfPossible()
@@ -148,6 +169,11 @@ class AsciiWallpaperService : WallpaperService() {
                     Intent.ACTION_SCREEN_OFF -> {
                         screenOn = false
                         userPresentSeen = false
+                        pendingUnlockAnimation = false
+                        // A deliberate lock/unlock cycle can be shorter than
+                        // the duplicate-broadcast guard. The new screen-on
+                        // event is a new chance for the transition.
+                        lastUnlockHandledAt = 0L
                         mainHandler.removeCallbacks(screenOnFallback)
                         stopRendering()
                     }
@@ -187,12 +213,14 @@ class AsciiWallpaperService : WallpaperService() {
                 renderer.setBattery(charging, batteryPercent)
                 renderer.updateSettings(settings)
                 renderer.setCornerPhase(cornerPhase)
+                renderer.setLocked(keyguardLocked())
             }
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder?) {
             super.onSurfaceCreated(holder)
             surfaceReady = true
+            applySurfaceFrameRate()
             startRenderingIfPossible()
         }
 
@@ -204,6 +232,7 @@ class AsciiWallpaperService : WallpaperService() {
         ) {
             super.onSurfaceChanged(holder, format, width, height)
             // Rotation/resize invalidates the previous frame immediately.
+            applySurfaceFrameRate()
             startRenderingIfPossible(force = true)
         }
 
@@ -216,6 +245,16 @@ class AsciiWallpaperService : WallpaperService() {
         override fun onVisibilityChanged(visible: Boolean) {
             this.visible = visible
             if (visible) {
+                // Re-check on every appearance. A missed USER_PRESENT or an
+                // OEM that flips the keyguard flag late must not leave the
+                // lock/home style stuck on the lock image at home. Once
+                // USER_PRESENT arrived, keep the unlocked state even if the
+                // keyguard flag is briefly stale while the transition is
+                // starting.
+                updateLockedState(
+                    if (userPresentSeen) false else keyguardLocked()
+                )
+                applySurfaceFrameRate()
                 startRenderingIfPossible()
             } else {
                 stopRendering()
@@ -252,15 +291,28 @@ class AsciiWallpaperService : WallpaperService() {
             val updated = Prefs.load(appContext)
             if (updated == settings) return
 
-            val targetChanged = updated.targetFps != settings.targetFps
+            val styleChanged = updated.style != settings.style
+            val targetChanged = updated.targetFps != settings.targetFps ||
+                styleChanged ||
+                updated.photoRevision != settings.photoRevision ||
+                updated.photoAnimated != settings.photoAnimated ||
+                updated.lockMediaRevision != settings.lockMediaRevision ||
+                updated.lockMediaAnimated != settings.lockMediaAnimated ||
+                updated.homeMediaRevision != settings.homeMediaRevision ||
+                updated.homeMediaAnimated != settings.homeMediaAnimated
             val colorsChanged = updated.backgroundColorArgb != settings.backgroundColorArgb ||
                 updated.glyphColorArgb != settings.glyphColorArgb
             settings = updated
             if (colorsChanged) notifyWallpaperColorsChanged()
+            if (styleChanged) updateLockedState(keyguardLocked())
             renderHandler.post {
                 renderer.setBattery(charging, batteryPercent)
                 renderer.updateSettings(updated)
                 if (targetChanged) {
+                    // Recompute after the renderer has loaded the new frame
+                    // set; otherwise the surface hint would describe the old
+                    // static/animated slot.
+                    applySurfaceFrameRate()
                     nextFrameAtMillis = 0L
                 }
             }
@@ -307,6 +359,10 @@ class AsciiWallpaperService : WallpaperService() {
                     renderer.setBattery(charging, batteryPercent)
                     renderer.setRenderingActive(true)
                     renderer.updateSettings(settings)
+                    // The renderer now knows which slot/photo is animated,
+                    // so this is the first moment the exact cadence hint can
+                    // be computed after a fresh surface or style switch.
+                    applySurfaceFrameRate()
                     // Resetting the corner positions on every color or
                     // density edit would snap a running unlock animation.
                     // Only restore the saved phase for a fresh engine start;
@@ -327,6 +383,60 @@ class AsciiWallpaperService : WallpaperService() {
             }
         }
 
+        private fun targetFrameRate(): Int = when {
+            settings.style == ShapeStyle.FASTFETCH -> 1
+            settings.style == ShapeStyle.ANDROID_LOGO -> 1
+            settings.style == ShapeStyle.PHOTO -> {
+                if (renderer.hasAnimatedMedia()) {
+                    renderer.animatedFrameRate()
+                } else {
+                    1
+                }
+            }
+            settings.style == ShapeStyle.LOCK_HOME -> {
+                when {
+                    // The pixel collapse/expand needs the full selected cadence
+                    // even when both still images are static.
+                    renderer.isLockHomeTransitionActive() ->
+                        settings.targetFps.coerceAtLeast(1)
+                    renderer.hasAnimatedLockHomeMedia() -> minOf(
+                        settings.targetFps.coerceAtLeast(1),
+                        renderer.lockHomeAnimatedFrameRate()
+                    )
+                    else -> 1
+                }
+            }
+            else -> settings.targetFps.coerceAtLeast(1)
+        }
+
+        /**
+         * Tell the compositor the cadence we actually intend to produce. On
+         * Android 11+ this lets a 90/120 Hz panel keep the wallpaper surface
+         * on its high-refresh mode instead of silently treating it as a
+         * 30/60 Hz background layer.
+         */
+        private fun applySurfaceFrameRate() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+            try {
+                val surface = surfaceHolder.surface
+                if (!surface.isValid) return
+                val rate = targetFrameRate().toFloat()
+                // For 90/120 Hz animation, FIXED_SOURCE asks the compositor to
+                // select a matching display mode instead of treating this as a
+                // generic background layer. Slower or static scenes use the
+                // default hint so they do not pin the panel unnecessarily.
+                val compatibility = if (rate >= 90f) {
+                    Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE
+                } else {
+                    Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
+                }
+                surface.setFrameRate(rate, compatibility)
+            } catch (_: Throwable) {
+                // Not every wallpaper surface/compositor exposes a frame-rate
+                // hint. The render loop still uses the requested cadence.
+            }
+        }
+
         private fun scheduleNextFrame() {
             if (!visible || !surfaceReady || !screenOn || frameScheduled ||
                 AppUiState.isSettingsVisible()
@@ -338,12 +448,7 @@ class AsciiWallpaperService : WallpaperService() {
             // without burning the render budget at 60–120 fps. An imported
             // clip only has 12-ish distinct frames per second; drawing its
             // ASCII grid at 60 fps would repeat identical work five times.
-            val targetFps = when {
-                settings.style == ShapeStyle.FASTFETCH -> 1
-                settings.style == ShapeStyle.PHOTO && renderer.hasAnimatedMedia() ->
-                    renderer.animatedFrameRate()
-                else -> settings.targetFps.coerceAtLeast(1)
-            }
+            val targetFps = targetFrameRate()
             val interval = (1_000L / targetFps).coerceAtLeast(1L)
             val now = SystemClock.uptimeMillis()
             if (nextFrameAtMillis == 0L ||
@@ -409,12 +514,18 @@ class AsciiWallpaperService : WallpaperService() {
         }
 
         private fun requestUnlockAnimation() {
-            if (!settings.unlockAnimationEnabled) return
+            // The lock/home style uses the unlock event for its pixelated
+            // bridge even when the optional spin/switcheroo effects are off.
+            if (!settings.unlockAnimationEnabled &&
+                settings.style != ShapeStyle.LOCK_HOME
+            ) {
+                return
+            }
             val now = SystemClock.elapsedRealtime()
             if (now - lastUnlockHandledAt < 1_200L) return
             lastUnlockHandledAt = now
 
-            if (!visible || !surfaceReady) {
+            if (!visible || !surfaceReady || AppUiState.isSettingsVisible()) {
                 pendingUnlockAnimation = true
                 return
             }
@@ -422,12 +533,33 @@ class AsciiWallpaperService : WallpaperService() {
         }
 
         private fun performUnlockAnimationOnRenderThread() {
-            if (!settings.unlockAnimationEnabled) return
-            if (settings.style.usesCornerSwap) {
+            if (!settings.unlockAnimationEnabled &&
+                settings.style != ShapeStyle.LOCK_HOME
+            ) {
+                return
+            }
+            // A perform block can be queued just before the screen turns off.
+            // Drop it instead of running an effect that nobody can see.
+            if (!screenOn) return
+            // Do not burn the lock/home transition while the settings screen
+            // covers the wallpaper. It will be consumed by the next
+            // startRenderingIfPossible() when the user returns.
+            if (!visible || !surfaceReady || AppUiState.isSettingsVisible()) {
+                pendingUnlockAnimation = true
+                return
+            }
+            // A pending unlock can arrive before the first frame after a
+            // surface/style change. Make sure onUnlock() sees the current
+            // style and loaded lock/home slots, not the renderer defaults.
+            renderer.updateSettings(settings)
+            if (settings.unlockAnimationEnabled && settings.style.usesCornerSwap) {
                 cornerPhase = 1 - cornerPhase
                 Prefs.saveCornerPhase(appContext, cornerPhase)
             }
             renderer.onUnlock(cornerPhase, System.nanoTime())
+            // If a still lock/home pair is about to animate its pixel
+            // transition, raise the surface cadence for the duration now.
+            applySurfaceFrameRate()
             if (!frameScheduled) {
                 renderStarted = true
                 nextFrameAtMillis = 0L

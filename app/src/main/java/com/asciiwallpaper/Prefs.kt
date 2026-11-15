@@ -10,9 +10,12 @@ enum class ShapeStyle(val prefValue: String) {
     BIG_CUBE("big_cube"),
     DNA("dna"),
     BLACK_HOLE("black_hole"),
+    DUCK("duck"),
+    DONUT("donut"),
     FASTFETCH("fastfetch"),
     ANDROID_LOGO("android_logo"),
     WAVES("waves"),
+    LOCK_HOME("lock_home"),
     PHOTO("photo");
 
     /**
@@ -63,6 +66,13 @@ enum class PhotoFit(val prefValue: String) {
     }
 }
 
+/** Storage slot for imported media. MAIN is the original single-photo style. */
+enum class MediaSlot(val suffix: String) {
+    MAIN(""),
+    LOCK("_lock"),
+    HOME("_home")
+}
+
 /** Immutable snapshot of everything the wallpaper renderer needs. */
 data class WallpaperSettings(
     val style: ShapeStyle = ShapeStyle.FUSILLI,
@@ -70,6 +80,8 @@ data class WallpaperSettings(
     val speedDegPerSec: Float = 9f,
     val symbolStyle: SymbolStyle = SymbolStyle.ASCII,
     val glyphColorArgb: Int = DEFAULT_GLYPH_COLOR,
+    /** 10-100 % opacity for ASCII glyphs and Nothing dots. */
+    val glyphOpacityPercent: Int = DEFAULT_GLYPH_OPACITY_PERCENT,
     val backgroundColorArgb: Int = DEFAULT_BACKGROUND_COLOR,
     val targetFps: Int = DEFAULT_FPS,
     val lineWidth: Float = 1f,
@@ -102,12 +114,27 @@ data class WallpaperSettings(
     val photoRevision: Int = 0,
     val photoFit: PhotoFit = PhotoFit.CONTAIN,
     /** True while the current photo revision is a GIF/video frame set. */
-    val photoAnimated: Boolean = false
+    val photoAnimated: Boolean = false,
+    /** Independent media used by the "lock screen / home screen" style. */
+    val lockMediaRevision: Int = 0,
+    val lockMediaAnimated: Boolean = false,
+    val homeMediaRevision: Int = 0,
+    val homeMediaAnimated: Boolean = false,
+    /**
+     * Duration of the unlock transition in the lock/home style. The source
+     * is first reduced to a coarse pixel grid and then grows back into the
+     * home image.
+     */
+    val lockHomeTransitionMs: Int = DEFAULT_LOCK_HOME_TRANSITION_MS
 ) {
     fun sanitized(): WallpaperSettings = copy(
         columns = columns.coerceIn(MIN_COLUMNS, MAX_COLUMNS),
         speedDegPerSec = speedDegPerSec.coerceIn(MIN_SPEED, MAX_SPEED),
         glyphColorArgb = glyphColorArgb or ALPHA_OPAQUE,
+        glyphOpacityPercent = glyphOpacityPercent.coerceIn(
+            MIN_GLYPH_OPACITY_PERCENT,
+            MAX_GLYPH_OPACITY_PERCENT
+        ),
         backgroundColorArgb = backgroundColorArgb or ALPHA_OPAQUE,
         targetFps = if (targetFps in FPS_OPTIONS) targetFps else DEFAULT_FPS,
         lineWidth = lineWidth.coerceIn(MIN_LINE_WIDTH, MAX_LINE_WIDTH),
@@ -118,6 +145,10 @@ data class WallpaperSettings(
         waveSpreadPercent = waveSpreadPercent.coerceIn(
             MIN_WAVE_SPREAD_PERCENT,
             MAX_WAVE_SPREAD_PERCENT
+        ),
+        lockHomeTransitionMs = lockHomeTransitionMs.coerceIn(
+            MIN_LOCK_HOME_TRANSITION_MS,
+            MAX_LOCK_HOME_TRANSITION_MS
         )
     )
 
@@ -134,6 +165,12 @@ data class WallpaperSettings(
         const val MIN_WAVE_SPREAD_PERCENT = 50
         const val MAX_WAVE_SPREAD_PERCENT = 150
         const val DEFAULT_WAVE_SPREAD_PERCENT = 100
+        const val MIN_GLYPH_OPACITY_PERCENT = 10
+        const val MAX_GLYPH_OPACITY_PERCENT = 100
+        const val DEFAULT_GLYPH_OPACITY_PERCENT = 100
+        const val MIN_LOCK_HOME_TRANSITION_MS = 300
+        const val MAX_LOCK_HOME_TRANSITION_MS = 3000
+        const val DEFAULT_LOCK_HOME_TRANSITION_MS = 900
         const val DEFAULT_FPS = 60
 
         /** Opaque white. */
@@ -161,6 +198,7 @@ object Prefs {
     private const val KEY_SPEED = "rotation_speed"
     private const val KEY_SYMBOL_STYLE = "symbol_style"
     private const val KEY_GLYPH_COLOR = "glyph_color"
+    private const val KEY_GLYPH_OPACITY = "glyph_opacity_percent"
     private const val KEY_BACKGROUND_COLOR = "background_color"
     private const val KEY_LEGACY_COLOR = "ascii_color"
     private const val KEY_TARGET_FPS = "target_fps"
@@ -174,6 +212,11 @@ object Prefs {
     private const val KEY_PHOTO_REVISION = "photo_revision"
     private const val KEY_PHOTO_FIT = "photo_fit"
     private const val KEY_PHOTO_ANIMATED = "photo_animated"
+    private const val KEY_LOCK_MEDIA_REVISION = "lock_media_revision"
+    private const val KEY_LOCK_MEDIA_ANIMATED = "lock_media_animated"
+    private const val KEY_HOME_MEDIA_REVISION = "home_media_revision"
+    private const val KEY_HOME_MEDIA_ANIMATED = "home_media_animated"
+    private const val KEY_LOCK_HOME_TRANSITION_MS = "lock_home_transition_ms"
     private const val KEY_CORNER_PHASE = "corner_phase"
 
     /** Preference keys that affect the renderer. Corner state is intentionally excluded. */
@@ -183,6 +226,7 @@ object Prefs {
         KEY_SPEED,
         KEY_SYMBOL_STYLE,
         KEY_GLYPH_COLOR,
+        KEY_GLYPH_OPACITY,
         KEY_BACKGROUND_COLOR,
         KEY_TARGET_FPS,
         KEY_LINE_WIDTH,
@@ -192,7 +236,12 @@ object Prefs {
         KEY_UNLOCK_ANIMATION,
         KEY_PHOTO_REVISION,
         KEY_PHOTO_FIT,
-        KEY_PHOTO_ANIMATED
+        KEY_PHOTO_ANIMATED,
+        KEY_LOCK_MEDIA_REVISION,
+        KEY_LOCK_MEDIA_ANIMATED,
+        KEY_HOME_MEDIA_REVISION,
+        KEY_HOME_MEDIA_ANIMATED,
+        KEY_LOCK_HOME_TRANSITION_MS
     )
 
     fun sharedPreferences(context: Context): SharedPreferences =
@@ -218,6 +267,10 @@ object Prefs {
             speedDegPerSec = p.getFloat(KEY_SPEED, 9f),
             symbolStyle = SymbolStyle.fromValue(p.getString(KEY_SYMBOL_STYLE, null)),
             glyphColorArgb = glyphColor,
+            glyphOpacityPercent = p.getInt(
+                KEY_GLYPH_OPACITY,
+                WallpaperSettings.DEFAULT_GLYPH_OPACITY_PERCENT
+            ),
             backgroundColorArgb = p.getInt(
                 KEY_BACKGROUND_COLOR,
                 WallpaperSettings.DEFAULT_BACKGROUND_COLOR
@@ -236,7 +289,15 @@ object Prefs {
             unlockAnimationEnabled = p.getBoolean(KEY_UNLOCK_ANIMATION, true),
             photoRevision = p.getInt(KEY_PHOTO_REVISION, 0),
             photoFit = PhotoFit.fromValue(p.getString(KEY_PHOTO_FIT, null)),
-            photoAnimated = p.getBoolean(KEY_PHOTO_ANIMATED, false)
+            photoAnimated = p.getBoolean(KEY_PHOTO_ANIMATED, false),
+            lockMediaRevision = p.getInt(KEY_LOCK_MEDIA_REVISION, 0),
+            lockMediaAnimated = p.getBoolean(KEY_LOCK_MEDIA_ANIMATED, false),
+            homeMediaRevision = p.getInt(KEY_HOME_MEDIA_REVISION, 0),
+            homeMediaAnimated = p.getBoolean(KEY_HOME_MEDIA_ANIMATED, false),
+            lockHomeTransitionMs = p.getInt(
+                KEY_LOCK_HOME_TRANSITION_MS,
+                WallpaperSettings.DEFAULT_LOCK_HOME_TRANSITION_MS
+            )
         ).sanitized()
     }
 
@@ -248,6 +309,7 @@ object Prefs {
             .putFloat(KEY_SPEED, clean.speedDegPerSec)
             .putString(KEY_SYMBOL_STYLE, clean.symbolStyle.prefValue)
             .putInt(KEY_GLYPH_COLOR, clean.glyphColorArgb)
+            .putInt(KEY_GLYPH_OPACITY, clean.glyphOpacityPercent)
             .putInt(KEY_BACKGROUND_COLOR, clean.backgroundColorArgb)
             .putInt(KEY_TARGET_FPS, clean.targetFps)
             .putFloat(KEY_LINE_WIDTH, clean.lineWidth)
@@ -258,6 +320,11 @@ object Prefs {
             .putInt(KEY_PHOTO_REVISION, clean.photoRevision)
             .putString(KEY_PHOTO_FIT, clean.photoFit.prefValue)
             .putBoolean(KEY_PHOTO_ANIMATED, clean.photoAnimated)
+            .putInt(KEY_LOCK_MEDIA_REVISION, clean.lockMediaRevision)
+            .putBoolean(KEY_LOCK_MEDIA_ANIMATED, clean.lockMediaAnimated)
+            .putInt(KEY_HOME_MEDIA_REVISION, clean.homeMediaRevision)
+            .putBoolean(KEY_HOME_MEDIA_ANIMATED, clean.homeMediaAnimated)
+            .putInt(KEY_LOCK_HOME_TRANSITION_MS, clean.lockHomeTransitionMs)
             .apply()
     }
 
