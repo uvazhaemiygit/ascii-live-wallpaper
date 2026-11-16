@@ -21,9 +21,9 @@ import kotlin.math.sqrt
  *  4. ASCII-режим рисует весь кадр с единым горизонтальным масштабом, а
  *     режим Nothing — точки разного диаметра, сгруппированные по размеру.
  *
- * Встроенный JetBrains Mono убирает зависимость от OEM-шрифта: раньше разные
- * глифы на некоторых прошивках имели разную ширину, и каждый ряд приходилось
- * растягивать отдельно. Из-за этого круг чёрной дыры «плыл» по краям.
+ * Встроенный JetBrains Mono убирает зависимость от OEM-шрифта: все глифы
+ * рампы имеют одинаковый advance, поэтому целый ряд рисуется одним drawText,
+ * а не отдельными позициями для каждого знака.
  */
 class AsciiFilter(context: Context? = null) {
     companion object {
@@ -65,9 +65,9 @@ class AsciiFilter(context: Context? = null) {
     private var cellHeight = 1f
     private var baselineOffset = 0f
     private var blockScaleX = 1f
+    private var glyphAdvance = 1f
     private var charBuffer = CharArray(0)
     private var rowHasInk = BooleanArray(0)
-    private var glyphPositions = FloatArray(0)
     private var scenePixels = IntArray(0)
 
     // The final ASCII/Nothing grid is one pixel per character cell. Scaling
@@ -167,21 +167,16 @@ class AsciiFilter(context: Context? = null) {
         val fm = glyphPaint.fontMetrics
         baselineOffset = (cellHeight - (fm.descent - fm.ascent)) * 0.5f - fm.ascent
 
-        // One global scale for every row. The bundled font has identical
-        // advances for all ASCII glyphs, but we also place every glyph at an
-        // explicit cell origin with drawPosText. Even if an OEM ever falls
-        // back to another font, cumulative advance drift can no longer make
-        // the left/right edges of a circle wobble row by row.
+        // The bundled font is monospaced, so one drawText call can draw a
+        // complete row at the font's natural advances. A single global
+        // horizontal scale then stretches those rows edge-to-edge. This is
+        // much faster than Canvas.drawPosText with a per-glyph position
+        // array, which is the hot path that made ASCII scenes fall behind
+        // while the batched Nothing dots stayed smooth.
         val referenceWidth = glyphPaint.measureText("M".repeat(columns))
         val referenceAdvance = (referenceWidth / columns).coerceAtLeast(0.001f)
+        glyphAdvance = referenceAdvance
         blockScaleX = width / (referenceAdvance * columns)
-
-        if (glyphPositions.size < columns * 2) {
-            glyphPositions = FloatArray(columns * 2)
-        }
-        for (col in 0 until columns) {
-            glyphPositions[col * 2] = col * referenceAdvance
-        }
 
         val cells = columns * rows
         // Keep the largest buffers while the lock/home transition animates the
@@ -343,7 +338,6 @@ class AsciiFilter(context: Context? = null) {
         return if (samples == 0) 0 else sum / samples
     }
 
-    @Suppress("DEPRECATION")
     private fun drawAsciiGray(
         canvas: Canvas,
         pixels: ByteArray,
@@ -370,24 +364,7 @@ class AsciiFilter(context: Context? = null) {
             }
         }
 
-        glyphPaint.color = glyphColorArgb
-        val rightEdgeScale = if (blockScaleX > 0f) blockScaleX else 1f
-        canvas.save()
-        canvas.scale(rightEdgeScale, 1f)
-        var rowStart = 0
-        for (row in 0 until rows) {
-            if (rowHasInk[row]) {
-                val baseline = row * cellHeight + baselineOffset
-                for (col in 0 until columns) {
-                    glyphPositions[col * 2 + 1] = baseline
-                }
-                canvas.drawPosText(
-                    charBuffer, rowStart, columns, glyphPositions, glyphPaint
-                )
-            }
-            rowStart += columns
-        }
-        canvas.restore()
+        drawAsciiRows(canvas, glyphColorArgb)
     }
 
     private fun drawNothingGray(
@@ -432,7 +409,6 @@ class AsciiFilter(context: Context? = null) {
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun drawAsciiGrid(
         canvas: Canvas,
         sceneWidth: Int,
@@ -450,7 +426,15 @@ class AsciiFilter(context: Context? = null) {
 
             for (col in 0 until columns) {
                 val average = if (sceneWidth == columns && sceneHeight == rows) {
-                    scenePixels[row * columns + col]
+                    // The native scale stores ARGB pixels here, not luminance.
+                    // Feed the same weighted luminance used by the legacy path
+                    // into the LUT, otherwise every opaque pixel is clamped to
+                    // zero and the whole wallpaper renders as blank cells.
+                    val rgb = scenePixels[row * columns + col]
+                    val r = (rgb ushr 16) and 0xFF
+                    val g = (rgb ushr 8) and 0xFF
+                    val b = rgb and 0xFF
+                    (r * 54 + g * 183 + b * 19) ushr 8
                 } else {
                     val x0 = col * sceneWidth / columns
                     val x1 = ((col + 1) * sceneWidth / columns)
@@ -477,6 +461,16 @@ class AsciiFilter(context: Context? = null) {
             }
         }
 
+        drawAsciiRows(canvas, glyphColorArgb)
+    }
+
+    /**
+     * Draws the already classified [charBuffer]. Each row is one drawText
+     * call instead of a drawPosText call with a position for every glyph.
+     * On the software Canvas used by live wallpapers this is the difference
+     * between a slideshow and a smooth ASCII animation.
+     */
+    private fun drawAsciiRows(canvas: Canvas, glyphColorArgb: Int) {
         glyphPaint.color = glyphColorArgb
         val rightEdgeScale = if (blockScaleX > 0f) blockScaleX else 1f
         canvas.save()
@@ -484,19 +478,27 @@ class AsciiFilter(context: Context? = null) {
         var rowStart = 0
         for (row in 0 until rows) {
             if (rowHasInk[row]) {
-                val baseline = row * cellHeight + baselineOffset
-                for (col in 0 until columns) {
-                    glyphPositions[col * 2 + 1] = baseline
+                // Most procedural scenes are outlines, so trimming the blank
+                // margins avoids asking Skia to lay out a full 96-200 glyph
+                // row when only the central dozen cells carry ink.
+                var first = 0
+                while (first < columns && charBuffer[rowStart + first] == ' ') {
+                    first++
                 }
-                // Deprecated for complex scripts, but the wallpaper ramp is
-                // plain ASCII. The explicit origins are the whole point here.
-                canvas.drawPosText(
-                    charBuffer,
-                    rowStart,
-                    columns,
-                    glyphPositions,
-                    glyphPaint
-                )
+                var last = columns - 1
+                while (last >= first && charBuffer[rowStart + last] == ' ') {
+                    last--
+                }
+                if (first <= last) {
+                    canvas.drawText(
+                        charBuffer,
+                        rowStart + first,
+                        last - first + 1,
+                        first * glyphAdvance,
+                        row * cellHeight + baselineOffset,
+                        glyphPaint
+                    )
+                }
             }
             rowStart += columns
         }
@@ -521,7 +523,15 @@ class AsciiFilter(context: Context? = null) {
 
             for (col in 0 until columns) {
                 val average = if (sceneWidth == columns && sceneHeight == rows) {
-                    scenePixels[row * columns + col]
+                    // The native scale stores ARGB pixels here, not luminance.
+                    // Feed the same weighted luminance used by the legacy path
+                    // into the LUT, otherwise every opaque pixel is clamped to
+                    // zero and the whole wallpaper renders as blank cells.
+                    val rgb = scenePixels[row * columns + col]
+                    val r = (rgb ushr 16) and 0xFF
+                    val g = (rgb ushr 8) and 0xFF
+                    val b = rgb and 0xFF
+                    (r * 54 + g * 183 + b * 19) ushr 8
                 } else {
                     val x0 = col * sceneWidth / columns
                     val x1 = ((col + 1) * sceneWidth / columns)

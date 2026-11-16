@@ -635,13 +635,15 @@ class AsciiRenderer(private val context: Context? = null) {
         val amount = waveScene.chargeColorMix()
         if (amount <= 0.001f) return
         val top = height * waveScene.batteryFillTopFraction()
+        val bottom = height * waveScene.batteryFillBottomFraction()
+        if (bottom <= top) return
         batteryOverlayPaint.color = Color.argb(
             (amount * 74f).toInt().coerceIn(0, 255),
             22,
             196,
             74
         )
-        canvas.drawRect(0f, top, width.toFloat(), height.toFloat(), batteryOverlayPaint)
+        canvas.drawRect(0f, top, width.toFloat(), bottom, batteryOverlayPaint)
     }
 
     /**

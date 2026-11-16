@@ -18,9 +18,11 @@ import kotlin.math.sin
  *    equalizer three times, at the live moment and with 200 ms / 500 ms
  *    echoes. This makes the motion visibly follow the track instead of
  *    collapsing into one synthetic-looking line;
- *  - charger connected: the ribbons flatten into one horizontal line whose
- *    height is the battery percentage (top = 100%, bottom = 0%). Everything
- *    below the line is filled green while the state fades in/out.
+ *  - charger connected: the ribbons first flatten into one horizontal line at
+ *    the wave anchor, then the line moves to the battery percentage height
+ *    (top = 100%, bottom = 0%). Only after the line has arrived does a green
+ *    fill grow downward from it. Unplugging reverses the sequence: the fill
+ *    drains first, then the line returns and finally unfolds into waves.
  *
  * [MusicSignal] detects an active music stream and its volume without a
  * permission. When the user enables [AudioSpectrumSource], real FFT levels are
@@ -39,6 +41,19 @@ class WaveSceneRenderer {
         private const val MUSIC_ECHO_SPREAD = 0.55f
         private const val HISTORY_CAPACITY = 96
         private const val BATTERY_FILL_BRIGHTNESS = 0.74f
+
+        // Charger choreography. The line owns the first part of the plug-in
+        // transition, then the fill is allowed to start. On unplugging the
+        // dependencies reverse: fill first, line last. Both line stages are
+        // driven by lineAmount: its first 55% flattens the ribbons, the last
+        // 45% travels from the wave anchor to the battery level.
+        private const val LINE_CONNECT_SECONDS = 1.05f
+        private const val FILL_CONNECT_SECONDS = 1.15f
+        private const val FILL_DISCONNECT_SECONDS = 0.85f
+        private const val LINE_DISCONNECT_SECONDS = 0.90f
+        private const val FLATTEN_PORTION = 0.55f
+        private const val LINE_SETTLED = 0.999f
+        private const val FILL_EMPTY = 0.0005f
         private val ECHO_DELAY_SECONDS = floatArrayOf(0f, 0.2f, 0.5f)
         // During music the live ribbon is the clearest one; older echoes fade
         // back instead of looking like the primary line.
@@ -75,20 +90,22 @@ class WaveSceneRenderer {
 
     private var musicAmount = 0f
     private var wasMusicActive = false
-    private var batteryAmount = 0f
+    private var lineAmount = 0f
+    private var fillAmount = 0f
     private var batteryLevel = 0.5f
     private var batteryTarget = 0.5f
 
     /**
      * Called when the WAVES style becomes visible. A charger that was already
-     * connected should show the meter immediately rather than replaying the
-     * plug-in transition; transitions are animated only while the style is on
-     * screen.
+     * connected should show the final meter immediately rather than replaying
+     * the plug-in transition; transitions are animated only while the style is
+     * on screen.
      */
     fun onShown(charging: Boolean, batteryPercent: Int) {
         batteryTarget = (batteryPercent.coerceIn(0, 100) / 100f)
         batteryLevel = batteryTarget
-        batteryAmount = if (charging) 1f else 0f
+        lineAmount = if (charging) 1f else 0f
+        fillAmount = if (charging) 1f else 0f
         musicAmount = 0f
         wasMusicActive = false
         smoothedLevels.fill(0f)
@@ -110,12 +127,7 @@ class WaveSceneRenderer {
         batteryLevel += (batteryTarget - batteryLevel) *
             (dt * levelSpeed).coerceIn(0f, 1f)
 
-        // No special flash any more: the three ribbons morph into the battery
-        // line, and the green fill fades in/out with the same amount.
-        val targetBattery = if (charging) 1f else 0f
-        batteryAmount += (targetBattery - batteryAmount) *
-            (dt * 2.8f).coerceIn(0f, 1f)
-        if (batteryAmount < 0.001f) batteryAmount = 0f
+        advanceChargeSequence(dt, charging)
 
         val targetMusic = if (musicActive && !charging) 1f else 0f
         musicAmount += (targetMusic - musicAmount) *
@@ -169,6 +181,48 @@ class WaveSceneRenderer {
         sampleDelayed(ECHO_DELAY_SECONDS[1], echoLevels[1])
         sampleDelayed(ECHO_DELAY_SECONDS[2], echoLevels[2])
     }
+
+    /**
+     * Runs the charger choreography. Plugging in fills [lineAmount] first;
+     * [fillAmount] cannot move until the line has reached its battery position.
+     * Unplugging drains [fillAmount] first and only then lets the line return
+     * to the waves. This is what makes the sequence readable instead of
+     * flattening and filling at the same time.
+     */
+    private fun advanceChargeSequence(dt: Float, charging: Boolean) {
+        val step = dt.coerceIn(0f, 0.1f)
+        if (charging) {
+            lineAmount = (lineAmount + step / LINE_CONNECT_SECONDS)
+                .coerceAtMost(1f)
+            if (lineAmount >= LINE_SETTLED) {
+                fillAmount = (fillAmount + step / FILL_CONNECT_SECONDS)
+                    .coerceAtMost(1f)
+            }
+        } else {
+            fillAmount = (fillAmount - step / FILL_DISCONNECT_SECONDS)
+                .coerceAtLeast(0f)
+            if (fillAmount <= FILL_EMPTY) {
+                fillAmount = 0f
+                lineAmount = (lineAmount - step / LINE_DISCONNECT_SECONDS)
+                    .coerceAtLeast(0f)
+            }
+        }
+    }
+
+    private fun smoothstep(value: Float): Float {
+        val x = value.coerceIn(0f, 1f)
+        return x * x * (3f - 2f * x)
+    }
+
+    /** 0 = waves, 1 = completely flattened line. */
+    private fun flattenMix(): Float = smoothstep(lineAmount / FLATTEN_PORTION)
+
+    /** 0 = line at the wave anchor, 1 = line at the battery level. */
+    private fun placeMix(): Float =
+        smoothstep((lineAmount - FLATTEN_PORTION) / (1f - FLATTEN_PORTION))
+
+    /** 0 = no fill, 1 = full green battery fill. */
+    private fun fillMix(): Float = smoothstep(fillAmount)
 
     private fun clearHistory() {
         historyHead = 0
@@ -232,11 +286,25 @@ class WaveSceneRenderer {
         }
     }
 
-    /** 0 = normal waves, 1 = green battery meter. */
-    fun chargeColorMix(): Float = batteryAmount.coerceIn(0f, 1f)
+    /**
+     * Green tint strength. It follows the fill, not the line, so the glyphs
+     * stay in the user's colour while the waves flatten and fade to green only
+     * as the battery strip grows downward.
+     */
+    fun chargeColorMix(): Float = fillMix()
 
     /** Top of the green battery fill, as a fraction of screen height. */
     fun batteryFillTopFraction(): Float = (1f - batteryLevel).coerceIn(0f, 1f)
+
+    /**
+     * Bottom of the visible fill. The strip starts at the battery line and
+     * grows toward the bottom edge as [fillAmount] rises; on unplugging the
+     * same fraction shrinks and the strip drains back up.
+     */
+    fun batteryFillBottomFraction(): Float {
+        val top = batteryFillTopFraction()
+        return (top + (1f - top) * fillMix()).coerceIn(0f, 1f)
+    }
 
     fun draw(
         canvas: Canvas,
@@ -260,14 +328,14 @@ class WaveSceneRenderer {
         val regionTop = height * WAVE_REGION_TOP
         val regionBottom = height * 0.998f
 
-        // The battery fill is drawn before the line so the top edge stays
-        // crisp. It reaches all the way to the bottom edge of the screen.
-        if (batteryAmount > 0.001f) {
-            val fillTop = height * (1f - batteryLevel)
-            fillPaint.color = SceneColor.gray(
-                BATTERY_FILL_BRIGHTNESS * batteryAmount
-            )
-            canvas.drawRect(0f, fillTop, width.toFloat(), height.toFloat(), fillPaint)
+        val batteryY = height * (1f - batteryLevel)
+        val fill = fillMix()
+        // The fill starts exactly on the line and grows downward. It is drawn
+        // before the line so the top edge stays crisp.
+        if (fill > 0.001f) {
+            val fillBottom = batteryY + (height - batteryY) * fill
+            fillPaint.color = SceneColor.gray(BATTERY_FILL_BRIGHTNESS)
+            canvas.drawRect(0f, batteryY, width.toFloat(), fillBottom, fillPaint)
         }
 
         // "Beat" scales only the oscillation; "spread" scales only the fixed
@@ -326,7 +394,8 @@ class WaveSceneRenderer {
             1f
         }
 
-        val batteryY = height * (1f - batteryLevel)
+        val flatten = flattenMix()
+        val place = placeMix()
 
         for (layer in 0 until 3) {
             wavePath.rewind()
@@ -362,8 +431,15 @@ class WaveSceneRenderer {
                     y += (musicY.coerceIn(regionTop, regionBottom) - y) *
                         musicAmount
                 }
-                if (batteryAmount > 0f) {
-                    y += (batteryY - y) * batteryAmount
+                // Plug-in phase 1: collapse the ribbon around its own anchor,
+                // without moving to the battery level yet.
+                if (flatten > 0f) {
+                    y = anchorY + (y - anchorY) * (1f - flatten)
+                }
+                // Plug-in phase 2: only the already-flat line travels to the
+                // height that represents the current charge.
+                if (place > 0f) {
+                    y += (batteryY - anchorY) * place
                 }
                 if (i == 0) wavePath.moveTo(x, y) else wavePath.lineTo(x, y)
             }
