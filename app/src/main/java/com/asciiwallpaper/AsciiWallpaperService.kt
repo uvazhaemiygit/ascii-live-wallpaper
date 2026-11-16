@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.os.PowerManager
+import android.os.Process
 import android.os.SystemClock
 import android.service.wallpaper.WallpaperService
 import android.util.Log
@@ -49,7 +50,14 @@ class AsciiWallpaperService : WallpaperService() {
         private val appContext: Context = applicationContext
         private val prefs = Prefs.sharedPreferences(appContext)
         private val mainHandler = Handler(Looper.getMainLooper())
-        private val renderThread = HandlerThread("ascii-render").apply { start() }
+        // A live wallpaper is decorative: when the launcher is drawing or
+        // scrolling, its render thread must yield instead of competing with
+        // the home screen at the same priority. Otherwise a 60/120 fps ASCII
+        // frame can steal just enough CPU to make launcher animations stutter.
+        private val renderThread = HandlerThread(
+            "ascii-render",
+            Process.THREAD_PRIORITY_BACKGROUND
+        ).apply { start() }
         private val renderHandler = Handler(renderThread.looper)
         private val renderer = AsciiRenderer(appContext)
 
@@ -63,6 +71,15 @@ class AsciiWallpaperService : WallpaperService() {
         @Volatile
         private var surfaceReady = false
 
+        // While the launcher is swiping between pages, drawing the wallpaper
+        // at the full 90/120 fps competes with the home-screen animation. A
+        // short, automatically expiring cap keeps the desktop responsive and
+        // then returns to the user's chosen cadence.
+        @Volatile
+        private var launcherInteractionUntil = 0L
+        private var lastOffsetX = Float.NaN
+        private var lastOffsetY = Float.NaN
+
         @Volatile
         private var charging = false
 
@@ -75,6 +92,7 @@ class AsciiWallpaperService : WallpaperService() {
         // These fields are only touched by renderThread.
         private var frameScheduled = false
         private var nextFrameAtMillis = 0L
+        private var lastDrawDurationMillis = 0L
         private var renderStarted = false
 
         private var lastUnlockHandledAt = 0L
@@ -101,7 +119,10 @@ class AsciiWallpaperService : WallpaperService() {
                     renderer.updateSettings(settings)
                     renderer.setCornerPhase(cornerPhase)
                 }
+                val drawStartedAt = SystemClock.uptimeMillis()
                 drawOneFrame(System.nanoTime())
+                lastDrawDurationMillis =
+                    SystemClock.uptimeMillis() - drawStartedAt
 
                 if (visible && surfaceReady && screenOn &&
                     renderer.needsContinuousRendering()
@@ -261,6 +282,29 @@ class AsciiWallpaperService : WallpaperService() {
             }
         }
 
+        override fun onOffsetsChanged(
+            xOffset: Float,
+            yOffset: Float,
+            xOffsetStep: Float,
+            yOffsetStep: Float,
+            xPixelOffset: Int,
+            yPixelOffset: Int
+        ) {
+            super.onOffsetsChanged(
+                xOffset,
+                yOffset,
+                xOffsetStep,
+                yOffsetStep,
+                xPixelOffset,
+                yPixelOffset
+            )
+            if (xOffset == lastOffsetX && yOffset == lastOffsetY) return
+            lastOffsetX = xOffset
+            lastOffsetY = yOffset
+            launcherInteractionUntil = SystemClock.uptimeMillis() +
+                LAUNCHER_INTERACTION_MS
+        }
+
         /**
          * Feeds the current wallpaper palette to Android's Wallpaper & style
          * pipeline. On Android 12+ launchers can use these colors for themed
@@ -410,10 +454,26 @@ class AsciiWallpaperService : WallpaperService() {
         }
 
         /**
-         * Tell the compositor the cadence we actually intend to produce. On
-         * Android 11+ this lets a 90/120 Hz panel keep the wallpaper surface
-         * on its high-refresh mode instead of silently treating it as a
-         * 30/60 Hz background layer.
+         * Rendering cadence for the frame loop. The surface frame-rate hint
+         * keeps the user's selected cadence, but during a launcher swipe we
+         * deliberately draw fewer wallpaper frames so the home screen gets
+         * the CPU it needs. The cap expires by itself after the gesture.
+         */
+        private fun renderFrameRate(): Int {
+            val requested = targetFrameRate()
+            return if (SystemClock.uptimeMillis() < launcherInteractionUntil) {
+                requested.coerceAtMost(LAUNCHER_INTERACTION_FPS)
+            } else {
+                requested
+            }
+        }
+
+        /**
+         * Tell the compositor the cadence we actually intend to produce. The
+         * hint is deliberately sent with DEFAULT compatibility: it lets a
+         * 90/120 Hz panel use the high-refresh mode when the whole device can
+         * sustain it, without the wallpaper pinning the panel and fighting
+         * the launcher's own animations.
          */
         private fun applySurfaceFrameRate() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
@@ -421,16 +481,16 @@ class AsciiWallpaperService : WallpaperService() {
                 val surface = surfaceHolder.surface
                 if (!surface.isValid) return
                 val rate = targetFrameRate().toFloat()
-                // For 90/120 Hz animation, FIXED_SOURCE asks the compositor to
-                // select a matching display mode instead of treating this as a
-                // generic background layer. Slower or static scenes use the
-                // default hint so they do not pin the panel unnecessarily.
-                val compatibility = if (rate >= 90f) {
-                    Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE
-                } else {
+                // Keep the selected cadence as a hint, but do not use
+                // FIXED_SOURCE here. Pinning the panel to the wallpaper's
+                // 90/120 Hz rate can make the launcher's own scrolling and
+                // app-open animations stutter on devices that cannot sustain
+                // that mode for every layer. DEFAULT lets the compositor pick
+                // the display mode while still seeing our requested rate.
+                surface.setFrameRate(
+                    rate,
                     Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
-                }
-                surface.setFrameRate(rate, compatibility)
+                )
             } catch (_: Throwable) {
                 // Not every wallpaper surface/compositor exposes a frame-rate
                 // hint. The render loop still uses the requested cadence.
@@ -448,18 +508,25 @@ class AsciiWallpaperService : WallpaperService() {
             // without burning the render budget at 60–120 fps. An imported
             // clip only has 12-ish distinct frames per second; drawing its
             // ASCII grid at 60 fps would repeat identical work five times.
-            val targetFps = targetFrameRate()
+            val targetFps = renderFrameRate()
             val interval = (1_000L / targetFps).coerceAtLeast(1L)
             val now = SystemClock.uptimeMillis()
-            if (nextFrameAtMillis == 0L ||
-                nextFrameAtMillis < now - 250L
-            ) {
+            if (nextFrameAtMillis == 0L) {
                 nextFrameAtMillis = now
+            } else if (nextFrameAtMillis < now) {
+                // If the draw itself overran the interval, drop the missed
+                // slot instead of running back-to-back: a saturated render
+                // thread is exactly what makes the launcher stutter. Plain
+                // scheduler latency with a fast draw is allowed to start now.
+                nextFrameAtMillis = if (lastDrawDurationMillis > interval) {
+                    now + interval
+                } else {
+                    now
+                }
             }
             frameScheduled = true
             renderHandler.postAtTime(frameRunnable, nextFrameAtMillis)
-            nextFrameAtMillis = (nextFrameAtMillis + interval)
-                .coerceAtLeast(now + 1L)
+            nextFrameAtMillis += interval
         }
 
         private fun stopRendering() {
@@ -476,6 +543,7 @@ class AsciiWallpaperService : WallpaperService() {
                 frameScheduled = false
             }
             nextFrameAtMillis = 0L
+            lastDrawDurationMillis = 0L
             renderStarted = false
             renderer.setRenderingActive(false)
             renderer.resetFrameClock()
@@ -672,5 +740,7 @@ class AsciiWallpaperService : WallpaperService() {
         private const val TAG = "AsciiWallpaper"
         private const val OPAQUE_BLACK = 0xFF000000.toInt()
         private const val CHARGING_GREEN = 0xFF6DFF82.toInt()
+        private const val LAUNCHER_INTERACTION_MS = 450L
+        private const val LAUNCHER_INTERACTION_FPS = 30
     }
 }
