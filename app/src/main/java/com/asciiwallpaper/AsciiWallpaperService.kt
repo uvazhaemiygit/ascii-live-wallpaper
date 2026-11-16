@@ -19,7 +19,6 @@ import android.os.Process
 import android.os.SystemClock
 import android.service.wallpaper.WallpaperService
 import android.util.Log
-import android.view.Surface
 import android.view.SurfaceHolder
 import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
@@ -130,9 +129,6 @@ class AsciiWallpaperService : WallpaperService() {
                     scheduleNextFrame()
                 } else {
                     nextFrameAtMillis = 0L
-                    // A static scene/lock transition has just finished. Drop
-                    // any temporary high-refresh hint so the panel can idle.
-                    applySurfaceFrameRate()
                 }
             }
         }
@@ -241,7 +237,6 @@ class AsciiWallpaperService : WallpaperService() {
         override fun onSurfaceCreated(holder: SurfaceHolder?) {
             super.onSurfaceCreated(holder)
             surfaceReady = true
-            applySurfaceFrameRate()
             startRenderingIfPossible()
         }
 
@@ -253,7 +248,6 @@ class AsciiWallpaperService : WallpaperService() {
         ) {
             super.onSurfaceChanged(holder, format, width, height)
             // Rotation/resize invalidates the previous frame immediately.
-            applySurfaceFrameRate()
             startRenderingIfPossible(force = true)
         }
 
@@ -275,7 +269,6 @@ class AsciiWallpaperService : WallpaperService() {
                 updateLockedState(
                     if (userPresentSeen) false else keyguardLocked()
                 )
-                applySurfaceFrameRate()
                 startRenderingIfPossible()
             } else {
                 stopRendering()
@@ -353,10 +346,6 @@ class AsciiWallpaperService : WallpaperService() {
                 renderer.setBattery(charging, batteryPercent)
                 renderer.updateSettings(updated)
                 if (targetChanged) {
-                    // Recompute after the renderer has loaded the new frame
-                    // set; otherwise the surface hint would describe the old
-                    // static/animated slot.
-                    applySurfaceFrameRate()
                     nextFrameAtMillis = 0L
                 }
             }
@@ -403,10 +392,6 @@ class AsciiWallpaperService : WallpaperService() {
                     renderer.setBattery(charging, batteryPercent)
                     renderer.setRenderingActive(true)
                     renderer.updateSettings(settings)
-                    // The renderer now knows which slot/photo is animated,
-                    // so this is the first moment the exact cadence hint can
-                    // be computed after a fresh surface or style switch.
-                    applySurfaceFrameRate()
                     // Resetting the corner positions on every color or
                     // density edit would snap a running unlock animation.
                     // Only restore the saved phase for a fresh engine start;
@@ -454,10 +439,15 @@ class AsciiWallpaperService : WallpaperService() {
         }
 
         /**
-         * Rendering cadence for the frame loop. The surface frame-rate hint
-         * keeps the user's selected cadence, but during a launcher swipe we
+         * Rendering cadence for the frame loop. During a launcher swipe we
          * deliberately draw fewer wallpaper frames so the home screen gets
          * the CPU it needs. The cap expires by itself after the gesture.
+         *
+         * No Surface.setFrameRate() hint is sent. On 120 Hz Xperia panels the
+         * old 60 Hz hint could make the compositor choose the 60 Hz display
+         * mode for the whole desktop: the wallpaper looked fine, but every
+         * launcher animation started stuttering. The compositor now chooses
+         * the display mode from the launcher and all other layers.
          */
         private fun renderFrameRate(): Int {
             val requested = targetFrameRate()
@@ -465,35 +455,6 @@ class AsciiWallpaperService : WallpaperService() {
                 requested.coerceAtMost(LAUNCHER_INTERACTION_FPS)
             } else {
                 requested
-            }
-        }
-
-        /**
-         * Tell the compositor the cadence we actually intend to produce. The
-         * hint is deliberately sent with DEFAULT compatibility: it lets a
-         * 90/120 Hz panel use the high-refresh mode when the whole device can
-         * sustain it, without the wallpaper pinning the panel and fighting
-         * the launcher's own animations.
-         */
-        private fun applySurfaceFrameRate() {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-            try {
-                val surface = surfaceHolder.surface
-                if (!surface.isValid) return
-                val rate = targetFrameRate().toFloat()
-                // Keep the selected cadence as a hint, but do not use
-                // FIXED_SOURCE here. Pinning the panel to the wallpaper's
-                // 90/120 Hz rate can make the launcher's own scrolling and
-                // app-open animations stutter on devices that cannot sustain
-                // that mode for every layer. DEFAULT lets the compositor pick
-                // the display mode while still seeing our requested rate.
-                surface.setFrameRate(
-                    rate,
-                    Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
-                )
-            } catch (_: Throwable) {
-                // Not every wallpaper surface/compositor exposes a frame-rate
-                // hint. The render loop still uses the requested cadence.
             }
         }
 
@@ -625,9 +586,6 @@ class AsciiWallpaperService : WallpaperService() {
                 Prefs.saveCornerPhase(appContext, cornerPhase)
             }
             renderer.onUnlock(cornerPhase, System.nanoTime())
-            // If a still lock/home pair is about to animate its pixel
-            // transition, raise the surface cadence for the duration now.
-            applySurfaceFrameRate()
             if (!frameScheduled) {
                 renderStarted = true
                 nextFrameAtMillis = 0L

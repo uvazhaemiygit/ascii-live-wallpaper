@@ -1080,7 +1080,7 @@ fun SettingsScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "ASCII LIVE WALLPAPER  /  v1.6.1",
+                    text = "ASCII LIVE WALLPAPER  /  v1.6.2",
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted.copy(alpha = 0.55f),
