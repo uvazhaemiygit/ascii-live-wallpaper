@@ -192,7 +192,7 @@ View с основными настройками рендера. Фото, GIF,
 SHA-256 финального APK:
 
 ```
-0ed607457df4df47382200267ede483ccd98fb161a69e0d953e9b04da0b53751  ASCII-Live-Wallpaper-v1.7.0.apk
+7199f85449485f19d70c16b700ccc0c7fcfbf0d3d48fbd0dbf417f17f01cff87  ASCII-Live-Wallpaper-v1.7.0.apk
 ```
 
 Исходники версии 1.7.0 поставляются отдельным архивом

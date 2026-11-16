@@ -236,8 +236,22 @@ class AsciiWallpaperService : WallpaperService() {
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
             screenOn = try {
-                (appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager)
-                    ?.isInteractive ?: true
+                val power = appContext.getSystemService(Context.POWER_SERVICE)
+                    as? PowerManager
+                if (power == null) {
+                    true
+                } else {
+                    try {
+                        // isInteractive() is API 20; reflection keeps the
+                        // method out of the API 19 verifier path.
+                        val method = PowerManager::class.java
+                            .getMethod("isInteractive")
+                        method.invoke(power) as? Boolean ?: power.isScreenOn
+                    } catch (_: Throwable) {
+                        @Suppress("DEPRECATION")
+                        power.isScreenOn
+                    }
+                }
             } catch (_: Throwable) {
                 true
             }
