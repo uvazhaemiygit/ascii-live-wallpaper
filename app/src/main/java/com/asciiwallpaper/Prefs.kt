@@ -84,6 +84,12 @@ data class WallpaperSettings(
     val glyphOpacityPercent: Int = DEFAULT_GLYPH_OPACITY_PERCENT,
     val backgroundColorArgb: Int = DEFAULT_BACKGROUND_COLOR,
     val targetFps: Int = DEFAULT_FPS,
+    /**
+     * On low-end devices, cap the rendered grid and FPS without changing the
+     * values shown in the settings. This keeps the launcher responsive on
+     * Snapdragon 425-class hardware while leaving fast phones untouched.
+     */
+    val autoPerformanceEnabled: Boolean = true,
     val lineWidth: Float = 1f,
     /**
      * Vertical "beat" (oscillation amplitude) of the idle waves, as a
@@ -202,6 +208,7 @@ object Prefs {
     private const val KEY_BACKGROUND_COLOR = "background_color"
     private const val KEY_LEGACY_COLOR = "ascii_color"
     private const val KEY_TARGET_FPS = "target_fps"
+    private const val KEY_AUTO_PERFORMANCE = "auto_performance"
     private const val KEY_LINE_WIDTH = "line_width"
     // Keep the old key so the value chosen in 1.4.0 survives the rename from
     // "wave height" to "wave beat".
@@ -229,6 +236,7 @@ object Prefs {
         KEY_GLYPH_OPACITY,
         KEY_BACKGROUND_COLOR,
         KEY_TARGET_FPS,
+        KEY_AUTO_PERFORMANCE,
         KEY_LINE_WIDTH,
         KEY_WAVE_BEAT,
         KEY_WAVE_SPREAD,
@@ -276,6 +284,7 @@ object Prefs {
                 WallpaperSettings.DEFAULT_BACKGROUND_COLOR
             ),
             targetFps = p.getInt(KEY_TARGET_FPS, WallpaperSettings.DEFAULT_FPS),
+            autoPerformanceEnabled = p.getBoolean(KEY_AUTO_PERFORMANCE, true),
             lineWidth = p.getFloat(KEY_LINE_WIDTH, 1f),
             waveBeatPercent = p.getInt(
                 KEY_WAVE_BEAT,
@@ -312,6 +321,7 @@ object Prefs {
             .putInt(KEY_GLYPH_OPACITY, clean.glyphOpacityPercent)
             .putInt(KEY_BACKGROUND_COLOR, clean.backgroundColorArgb)
             .putInt(KEY_TARGET_FPS, clean.targetFps)
+            .putBoolean(KEY_AUTO_PERFORMANCE, clean.autoPerformanceEnabled)
             .putFloat(KEY_LINE_WIDTH, clean.lineWidth)
             .putInt(KEY_WAVE_BEAT, clean.waveBeatPercent)
             .putInt(KEY_WAVE_SPREAD, clean.waveSpreadPercent)

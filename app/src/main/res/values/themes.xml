@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.AsciiWallpaper" parent="@android:style/Theme.Material.NoActionBar">
+    <!--
+        Android 4.4 base theme. Material and colorAccent are API 21+, so the
+        Material version lives in values-v21/themes.xml. Keeping this parent
+        Holo prevents a missing-resource crash on API 19.
+    -->
+    <style name="Theme.AsciiWallpaper" parent="@android:style/Theme.Holo.NoActionBar">
         <item name="android:windowBackground">@color/app_background</item>
-        <item name="android:colorAccent">@color/accent_green</item>
         <item name="android:fontFamily">monospace</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

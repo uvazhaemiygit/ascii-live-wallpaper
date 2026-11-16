@@ -39,9 +39,31 @@ import kotlin.math.roundToInt
  */
 class AsciiWallpaperService : WallpaperService() {
 
-    override fun onCreateEngine(): Engine = AsciiEngine()
+    override fun onCreateEngine(): Engine {
+        // The color-aware engine overrides API 27 WallpaperService.Engine
+        // callbacks. Load it only on API 27+ and by name so the API 19
+        // Dalvik verifier never has to resolve android.app.WallpaperColors
+        // while starting the wallpaper service.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            try {
+                val engineClass = Class.forName(
+                    "com.asciiwallpaper.AsciiWallpaperService\$ModernAsciiEngine",
+                    false,
+                    javaClass.classLoader
+                )
+                val constructor = engineClass.getDeclaredConstructor(
+                    AsciiWallpaperService::class.java
+                )
+                constructor.isAccessible = true
+                return constructor.newInstance(this) as Engine
+            } catch (t: Throwable) {
+                Log.w(TAG, "Color-aware wallpaper engine unavailable", t)
+            }
+        }
+        return AsciiEngine()
+    }
 
-    private inner class AsciiEngine :
+    private open inner class AsciiEngine :
         Engine(),
         SharedPreferences.OnSharedPreferenceChangeListener,
         AppUiState.Listener {
@@ -115,7 +137,7 @@ class AsciiWallpaperService : WallpaperService() {
                 renderer.setBattery(charging, batteryPercent)
                 if (!renderStarted) {
                     renderStarted = true
-                    renderer.updateSettings(settings)
+                    renderer.updateSettings(effectiveSettings())
                     renderer.setCornerPhase(cornerPhase)
                 }
                 val drawStartedAt = SystemClock.uptimeMillis()
@@ -228,7 +250,7 @@ class AsciiWallpaperService : WallpaperService() {
             AppUiState.addListener(this)
             renderHandler.post {
                 renderer.setBattery(charging, batteryPercent)
-                renderer.updateSettings(settings)
+                renderer.updateSettings(effectiveSettings())
                 renderer.setCornerPhase(cornerPhase)
                 renderer.setLocked(keyguardLocked())
             }
@@ -299,25 +321,13 @@ class AsciiWallpaperService : WallpaperService() {
         }
 
         /**
-         * Feeds the current wallpaper palette to Android's Wallpaper & style
-         * pipeline. On Android 12+ launchers can use these colors for themed
-         * (Material You) icons; the launcher remains in control of whether the
-         * user's themed-icon option is enabled.
-         *
-         * The selected background is the primary seed, the glyph color is the
-         * secondary accent, and the charging green is a tertiary accent. This
-         * method is only requested by the framework on API 27+.
+         * Subclasses may publish palette changes on API 27+. The base engine
+         * deliberately has no reference to android.app.WallpaperColors so it
+         * stays loadable on Android 4.4.
          */
-        override fun onComputeColors(): WallpaperColors? {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return null
-            return runCatching {
-                WallpaperColors(
-                    Color.valueOf(settings.backgroundColorArgb or OPAQUE_BLACK),
-                    Color.valueOf(settings.glyphColorArgb or OPAQUE_BLACK),
-                    Color.valueOf(CHARGING_GREEN)
-                )
-            }.getOrNull()
-        }
+        protected open fun onPaletteChanged() = Unit
+
+        protected fun paletteSettings(): WallpaperSettings = settings
 
         override fun onSharedPreferenceChanged(
             sharedPreferences: SharedPreferences?,
@@ -330,6 +340,8 @@ class AsciiWallpaperService : WallpaperService() {
 
             val styleChanged = updated.style != settings.style
             val targetChanged = updated.targetFps != settings.targetFps ||
+                updated.columns != settings.columns ||
+                updated.autoPerformanceEnabled != settings.autoPerformanceEnabled ||
                 styleChanged ||
                 updated.photoRevision != settings.photoRevision ||
                 updated.photoAnimated != settings.photoAnimated ||
@@ -340,26 +352,16 @@ class AsciiWallpaperService : WallpaperService() {
             val colorsChanged = updated.backgroundColorArgb != settings.backgroundColorArgb ||
                 updated.glyphColorArgb != settings.glyphColorArgb
             settings = updated
-            if (colorsChanged) notifyWallpaperColorsChanged()
+            if (colorsChanged) onPaletteChanged()
             if (styleChanged) updateLockedState(keyguardLocked())
             renderHandler.post {
                 renderer.setBattery(charging, batteryPercent)
-                renderer.updateSettings(updated)
+                renderer.updateSettings(effectiveSettings())
                 if (targetChanged) {
                     nextFrameAtMillis = 0L
                 }
             }
             startRenderingIfPossible(force = true)
-        }
-
-        private fun notifyWallpaperColorsChanged() {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return
-            try {
-                notifyColorsChanged()
-            } catch (_: Throwable) {
-                // Some launchers/OEM wallpaper services do not observe live
-                // palette changes; the next onComputeColors call still works.
-            }
         }
 
         override fun onSettingsVisibilityChanged(visible: Boolean) {
@@ -391,7 +393,7 @@ class AsciiWallpaperService : WallpaperService() {
                     renderStarted = true
                     renderer.setBattery(charging, batteryPercent)
                     renderer.setRenderingActive(true)
-                    renderer.updateSettings(settings)
+                    renderer.updateSettings(effectiveSettings())
                     // Resetting the corner positions on every color or
                     // density edit would snap a running unlock animation.
                     // Only restore the saved phase for a fresh engine start;
@@ -412,31 +414,40 @@ class AsciiWallpaperService : WallpaperService() {
             }
         }
 
-        private fun targetFrameRate(): Int = when {
-            settings.style == ShapeStyle.FASTFETCH -> 1
-            settings.style == ShapeStyle.ANDROID_LOGO -> 1
-            settings.style == ShapeStyle.PHOTO -> {
-                if (renderer.hasAnimatedMedia()) {
-                    renderer.animatedFrameRate()
-                } else {
-                    1
+        private fun targetFrameRate(): Int {
+            val effective = effectiveSettings()
+            return when {
+                settings.style == ShapeStyle.FASTFETCH -> 1
+                settings.style == ShapeStyle.ANDROID_LOGO -> 1
+                settings.style == ShapeStyle.PHOTO -> {
+                    if (renderer.hasAnimatedMedia()) {
+                        minOf(
+                            renderer.animatedFrameRate(),
+                            effective.targetFps.coerceAtLeast(1)
+                        )
+                    } else {
+                        1
+                    }
                 }
-            }
-            settings.style == ShapeStyle.LOCK_HOME -> {
-                when {
-                    // The pixel collapse/expand needs the full selected cadence
-                    // even when both still images are static.
-                    renderer.isLockHomeTransitionActive() ->
-                        settings.targetFps.coerceAtLeast(1)
-                    renderer.hasAnimatedLockHomeMedia() -> minOf(
-                        settings.targetFps.coerceAtLeast(1),
-                        renderer.lockHomeAnimatedFrameRate()
-                    )
-                    else -> 1
+                settings.style == ShapeStyle.LOCK_HOME -> {
+                    when {
+                        // The pixel collapse/expand needs the full selected cadence
+                        // even when both still images are static.
+                        renderer.isLockHomeTransitionActive() ->
+                            effective.targetFps.coerceAtLeast(1)
+                        renderer.hasAnimatedLockHomeMedia() -> minOf(
+                            effective.targetFps.coerceAtLeast(1),
+                            renderer.lockHomeAnimatedFrameRate()
+                        )
+                        else -> 1
+                    }
                 }
+                else -> effective.targetFps.coerceAtLeast(1)
             }
-            else -> settings.targetFps.coerceAtLeast(1)
         }
+
+        private fun effectiveSettings(): WallpaperSettings =
+            PerformancePolicy.effective(settings, appContext)
 
         /**
          * Rendering cadence for the frame loop. During a launcher swipe we
@@ -526,7 +537,7 @@ class AsciiWallpaperService : WallpaperService() {
                         width = canvas.width,
                         height = canvas.height,
                         timeNanos = frameTimeNanos,
-                        newSettings = settings
+                        newSettings = effectiveSettings()
                     )
                 }
             } catch (e: Exception) {
@@ -580,7 +591,7 @@ class AsciiWallpaperService : WallpaperService() {
             // A pending unlock can arrive before the first frame after a
             // surface/style change. Make sure onUnlock() sees the current
             // style and loaded lock/home slots, not the renderer defaults.
-            renderer.updateSettings(settings)
+            renderer.updateSettings(effectiveSettings())
             if (settings.unlockAnimationEnabled && settings.style.usesCornerSwap) {
                 cornerPhase = 1 - cornerPhase
                 Prefs.saveCornerPhase(appContext, cornerPhase)
@@ -694,11 +705,37 @@ class AsciiWallpaperService : WallpaperService() {
         }
     }
 
+    /**
+     * API 27+ engine. This class is loaded by reflection only, so its
+     * android.app.WallpaperColors signature is never resolved on Android 4.4.
+     */
+    private inner class ModernAsciiEngine : AsciiEngine() {
+        override fun onComputeColors(): WallpaperColors? {
+            return runCatching {
+                val palette = paletteSettings()
+                WallpaperColors(
+                    Color.valueOf(palette.backgroundColorArgb or OPAQUE_BLACK),
+                    Color.valueOf(palette.glyphColorArgb or OPAQUE_BLACK),
+                    Color.valueOf(CHARGING_GREEN)
+                )
+            }.getOrNull()
+        }
+
+        override fun onPaletteChanged() {
+            try {
+                notifyColorsChanged()
+            } catch (_: Throwable) {
+                // Some launchers/OEM wallpaper services do not observe live
+                // palette changes; the next onComputeColors call still works.
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "AsciiWallpaper"
         private const val OPAQUE_BLACK = 0xFF000000.toInt()
         private const val CHARGING_GREEN = 0xFF6DFF82.toInt()
-        private const val LAUNCHER_INTERACTION_MS = 450L
+        private const val LAUNCHER_INTERACTION_MS = 750L
         private const val LAUNCHER_INTERACTION_FPS = 30
     }
 }

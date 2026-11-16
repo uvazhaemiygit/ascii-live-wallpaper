@@ -115,6 +115,24 @@
     <string name="fps_value">%1$d FPS</string>
     <string name="fps_hint">30, 45, 60, 90 или 120 FPS. Высокие значения заметны только на экране с такой частотой обновления; предпросмотр и обои теперь не ограничены скрытым лимитом 30 FPS.</string>
 
+    <string name="auto_performance_title">Авто-производительность</string>
+    <string name="auto_performance_detail">На слабых устройствах, включая Snapdragon 425 и Android 4.4, автоматически ограничивает плотность и FPS, чтобы рабочий стол не лагал. На быстрых телефонах ничего не меняется.</string>
+    <string name="auto_performance_capped">Включено: рендер %1$d колонок / %2$d FPS. Выбранные значения сохранены и вернутся на быстром устройстве.</string>
+    <string name="auto_performance_normal">Включено. Устройство достаточно быстрое, ограничение не применяется.</string>
+    <string name="auto_performance_off">Выключено: используются выбранные плотность и FPS.</string>
+    <string name="auto_performance_toggle_description">Включить или выключить автоматическую производительность</string>
+
+    <string name="static_wallpaper_title">Статичная копия для прозрачных виджетов</string>
+    <string name="static_wallpaper_detail">Прозрачность виджетов Nothing работает только со статичными обоями. Кнопка сохранит текущий кадр как обычные обои, и анимация остановится.</string>
+    <string name="static_wallpaper_button">Сделать статичную копию</string>
+    <string name="static_wallpaper_working">Устанавливаю статичную копию…</string>
+    <string name="static_wallpaper_confirm_title">Остановить анимацию?</string>
+    <string name="static_wallpaper_confirm_message">Текущий кадр станет обычными статичными обоями. Это включит прозрачность виджетов Nothing, но живые волны, кубы и музыкальная анимация остановятся. Вернуть живые обои можно кнопкой «Установить обои».</string>
+    <string name="static_wallpaper_confirm_yes">Установить копию</string>
+    <string name="static_wallpaper_done">Статичная копия установлена. Прозрачные виджеты должны снова работать.</string>
+    <string name="static_wallpaper_failed">Не удалось установить статичную копию: %1$s</string>
+    <string name="static_wallpaper_cancel">Отмена</string>
+
     <string name="section_lines">04 / ЛИНИИ</string>
     <string name="line_width_title">Толщина линий</string>
     <string name="line_width_value">%1$s×</string>

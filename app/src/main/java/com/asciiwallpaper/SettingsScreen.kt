@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -222,6 +224,9 @@ fun SettingsScreen(
     }
     var spectrumDenied by rememberSaveable { mutableStateOf(false) }
     var targetFps by rememberSaveable { mutableIntStateOf(initialSettings.targetFps) }
+    var autoPerformance by rememberSaveable {
+        mutableStateOf(initialSettings.autoPerformanceEnabled)
+    }
     var lineWidth by rememberSaveable { mutableStateOf(initialSettings.lineWidth) }
     var unlockAnimationEnabled by rememberSaveable {
         mutableStateOf(initialSettings.unlockAnimationEnabled)
@@ -277,6 +282,8 @@ fun SettingsScreen(
     var showPhotoFitSheet by rememberSaveable { mutableStateOf(false) }
     var showGlyphColorPicker by rememberSaveable { mutableStateOf(false) }
     var showBackgroundColorPicker by rememberSaveable { mutableStateOf(false) }
+    var showStaticWallpaperDialog by rememberSaveable { mutableStateOf(false) }
+    var staticWallpaperBusy by remember { mutableStateOf(false) }
     val photoScope = rememberCoroutineScope()
 
     val style = remember(styleValue) { ShapeStyle.fromValue(styleValue) }
@@ -292,6 +299,7 @@ fun SettingsScreen(
         glyphOpacityPercent = glyphOpacity,
         backgroundColorArgb = backgroundColorValue,
         targetFps = targetFps,
+        autoPerformanceEnabled = autoPerformance,
         lineWidth = lineWidth,
         waveBeatPercent = waveBeat,
         waveSpreadPercent = waveSpread,
@@ -309,6 +317,32 @@ fun SettingsScreen(
 
     fun commit(updated: WallpaperSettings = currentSettings) {
         onSettingsChanged(updated.sanitized())
+    }
+
+    fun exportStaticWallpaper() {
+        if (staticWallpaperBusy) return
+        showStaticWallpaperDialog = false
+        staticWallpaperBusy = true
+        val exportSettings = PerformancePolicy.effective(
+            currentSettings,
+            appContext
+        )
+        photoScope.launch {
+            val result = withContext(Dispatchers.Default) {
+                StaticWallpaper.export(appContext, exportSettings)
+            }
+            staticWallpaperBusy = false
+            val message = result.fold(
+                onSuccess = { context.getString(R.string.static_wallpaper_done) },
+                onFailure = {
+                    context.getString(
+                        R.string.static_wallpaper_failed,
+                        it.message ?: it.javaClass.simpleName
+                    )
+                }
+            )
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        }
     }
 
     val photoPicker = rememberLauncherForActivityResult(
@@ -887,6 +921,30 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = TextMuted
                         )
+                        Spacer(Modifier.height(16.dp))
+                        AutoPerformanceRow(
+                            enabled = autoPerformance,
+                            capped = PerformancePolicy.isCapped(
+                                currentSettings,
+                                appContext
+                            ),
+                            effectiveColumns = PerformancePolicy.effective(
+                                currentSettings,
+                                appContext
+                            ).columns,
+                            effectiveFps = PerformancePolicy.effective(
+                                currentSettings,
+                                appContext
+                            ).targetFps,
+                            onToggle = { enabled ->
+                                autoPerformance = enabled
+                                commit(
+                                    currentSettings.copy(
+                                        autoPerformanceEnabled = enabled
+                                    )
+                                )
+                            }
+                        )
                     }
 
                     if (style != ShapeStyle.LOCK_HOME) {
@@ -1069,6 +1127,30 @@ fun SettingsScreen(
                         color = TextMuted,
                         textAlign = TextAlign.Center
                     )
+                    TextButton(
+                        onClick = { showStaticWallpaperDialog = true },
+                        enabled = !staticWallpaperBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = stringResource(
+                                if (staticWallpaperBusy) {
+                                    R.string.static_wallpaper_working
+                                } else {
+                                    R.string.static_wallpaper_button
+                                }
+                            ),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (staticWallpaperBusy) TextMuted else AccentGreen
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.static_wallpaper_detail),
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMuted,
+                        textAlign = TextAlign.Center
+                    )
                 }
 
                 Spacer(Modifier.height(4.dp))
@@ -1080,7 +1162,7 @@ fun SettingsScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "ASCII LIVE WALLPAPER  /  v1.6.2",
+                    text = "ASCII LIVE WALLPAPER  /  v1.7.0",
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted.copy(alpha = 0.55f),
@@ -1123,6 +1205,41 @@ fun SettingsScreen(
             onConfirm = { color ->
                 selectBackgroundColor(color)
                 showBackgroundColorPicker = false
+            }
+        )
+    }
+
+    if (showStaticWallpaperDialog) {
+        AlertDialog(
+            onDismissRequest = { showStaticWallpaperDialog = false },
+            title = {
+                Text(
+                    text = stringResource(R.string.static_wallpaper_confirm_title),
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(R.string.static_wallpaper_confirm_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextMuted
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { exportStaticWallpaper() }) {
+                    Text(
+                        text = stringResource(R.string.static_wallpaper_confirm_yes),
+                        color = AccentGreen
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStaticWallpaperDialog = false }) {
+                    Text(
+                        text = stringResource(R.string.static_wallpaper_cancel),
+                        color = TextMuted
+                    )
+                }
             }
         )
     }
@@ -1679,8 +1796,10 @@ private fun LiveAsciiPreview(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val appContext = context.applicationContext
+    val renderedSettings = PerformancePolicy.effective(settings, appContext)
     val renderer = remember(context) {
-        AsciiRenderer(context.applicationContext)
+        AsciiRenderer(appContext)
     }
     DisposableEffect(renderer) {
         onDispose { renderer.release() }
@@ -1690,25 +1809,24 @@ private fun LiveAsciiPreview(
 
     LaunchedEffect(
         lifecycleOwner,
-        settings.targetFps,
-        settings.style,
-        settings.photoRevision,
-        settings.photoAnimated,
-        settings.lockMediaRevision,
-        settings.lockMediaAnimated,
-        settings.homeMediaRevision,
-        settings.homeMediaAnimated
+        renderedSettings.targetFps,
+        renderedSettings.style,
+        renderedSettings.photoRevision,
+        renderedSettings.photoAnimated,
+        renderedSettings.lockMediaRevision,
+        renderedSettings.lockMediaAnimated,
+        renderedSettings.homeMediaRevision,
+        renderedSettings.homeMediaAnimated
     ) {
-        // The preview honours the user's FPS preset, including 90/120. The
-        // filter now performs its downsampling in native Canvas code and the
-        // wallpaper scene is paused while settings are visible, so limiting
-        // the live preview to 30 fps would falsely make every preset look
-        // like a 30 fps wallpaper. Fastfetch and animated media still have
-        // their own natural refresh rates.
-        if ((settings.style == ShapeStyle.PHOTO && !settings.photoAnimated) ||
-            settings.style == ShapeStyle.ANDROID_LOGO ||
-            (settings.style == ShapeStyle.LOCK_HOME &&
-                !settings.lockMediaAnimated && !settings.homeMediaAnimated)
+        // The preview honours the user's FPS preset, including 90/120, but
+        // Auto mode applies the same low-end cap as the live wallpaper so
+        // editing settings does not fight the launcher on a slow phone.
+        if ((renderedSettings.style == ShapeStyle.PHOTO &&
+                !renderedSettings.photoAnimated) ||
+            renderedSettings.style == ShapeStyle.ANDROID_LOGO ||
+            (renderedSettings.style == ShapeStyle.LOCK_HOME &&
+                !renderedSettings.lockMediaAnimated &&
+                !renderedSettings.homeMediaAnimated)
         ) {
             // A still photo, a static Android logo and a static lock/home
             // pair are complete after their first draw. Recomposition
@@ -1716,11 +1834,11 @@ private fun LiveAsciiPreview(
             // would only heat the phone.
             return@LaunchedEffect
         }
-        val previewFps = when (settings.style) {
+        val previewFps = when (renderedSettings.style) {
             ShapeStyle.FASTFETCH -> 4
             ShapeStyle.PHOTO -> 12
             ShapeStyle.LOCK_HOME -> 12
-            else -> settings.targetFps.coerceIn(1, 120)
+            else -> renderedSettings.targetFps.coerceIn(1, 120)
         }
         val intervalNanos = 1_000_000_000L / previewFps
         // Advance a fractional target instead of resetting the deadline to the
@@ -1756,7 +1874,7 @@ private fun LiveAsciiPreview(
                 width = size.width.roundToInt(),
                 height = size.height.roundToInt(),
                 timeNanos = time,
-                newSettings = settings
+                newSettings = renderedSettings
             )
         }
     }
@@ -2347,6 +2465,65 @@ private fun FpsChoice(
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace,
             color = if (selected) AccentGreen else TextMuted
+        )
+    }
+}
+
+@Composable
+private fun AutoPerformanceRow(
+    enabled: Boolean,
+    capped: Boolean,
+    effectiveColumns: Int,
+    effectiveFps: Int,
+    onToggle: (Boolean) -> Unit
+) {
+    val toggleDescription = stringResource(
+        R.string.auto_performance_toggle_description
+    )
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.auto_performance_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (enabled) TextPrimary else TextMuted
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource(R.string.auto_performance_detail),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Switch(
+                checked = enabled,
+                onCheckedChange = onToggle,
+                modifier = Modifier.semantics {
+                    contentDescription = toggleDescription
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = AppBackground,
+                    checkedTrackColor = AccentGreenStrong,
+                    uncheckedThumbColor = TextMuted,
+                    uncheckedTrackColor = Color(0xFF263A2B),
+                    uncheckedBorderColor = PanelBorder
+                )
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = when {
+                !enabled -> stringResource(R.string.auto_performance_off)
+                capped -> stringResource(
+                    R.string.auto_performance_capped,
+                    effectiveColumns,
+                    effectiveFps
+                )
+                else -> stringResource(R.string.auto_performance_normal)
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (enabled && capped) AccentGreen.copy(alpha = 0.82f) else TextMuted
         )
     }
 }

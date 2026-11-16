@@ -437,13 +437,23 @@ object MediaAsciiStore {
     ): Bitmap? {
         var frame: Bitmap? = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            // Use reflection so the API 19 Dalvik verifier never has to
+            // resolve this API 27 method. On 27+ it is a normal call.
             frame = try {
-                retriever.getScaledFrameAtTime(
+                val method = MediaMetadataRetriever::class.java.getMethod(
+                    "getScaledFrameAtTime",
+                    java.lang.Long.TYPE,
+                    java.lang.Integer.TYPE,
+                    java.lang.Integer.TYPE,
+                    java.lang.Integer.TYPE
+                )
+                method.invoke(
+                    retriever,
                     timeUs,
                     MediaMetadataRetriever.OPTION_CLOSEST,
                     targetWidth,
                     targetHeight
-                )
+                ) as? Bitmap
             } catch (t: Throwable) {
                 Log.w(TAG, "Scaled video frame failed at $timeUs us", t)
                 null
@@ -474,7 +484,7 @@ object MediaAsciiStore {
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            frame.config == Bitmap.Config.HARDWARE
+            frame.config.name == "HARDWARE"
         ) {
             val software = try {
                 frame.copy(Bitmap.Config.ARGB_8888, false)

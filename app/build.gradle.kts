@@ -9,10 +9,11 @@ android {
 
     defaultConfig {
         applicationId = "com.asciiwallpaper"
-        minSdk = 24
+        minSdk = 19
         targetSdk = 34
-        versionCode = 19
-        versionName = "1.6.2"
+        versionCode = 20
+        versionName = "1.7.0"
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -64,6 +65,7 @@ dependencies {
     implementation(composeBom)
 
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.multidex:multidex:2.0.1")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.2")
