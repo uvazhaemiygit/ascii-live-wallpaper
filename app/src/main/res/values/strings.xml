@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">ASCII Live Wallpaper</string>
     <string name="settings_title">ASCII-обои</string>
-    <string name="settings_subtitle">Двенадцать сцен: ASCII-арт, точечная матрица Nothing, 3D-уточка и пончик, fastfetch, ASCII-логотип Android, три волны под музыку и две обои для блокировки и домашнего экрана. Свои цвета, прозрачность и палитра для «Обои и стиль», без сети.</string>
+    <string name="settings_subtitle">Пятнадцать сцен: ASCII-арт, точечная матрица Nothing, 3D-уточка и пончик, космос и снег, fastfetch, ASCII- и 3D-логотип Android, три волны под музыку и две обои для блокировки и домашнего экрана. Свои цвета, прозрачность и палитра для «Обои и стиль», без сети.</string>
 
     <string name="preview_title">ПРЕДПРОСМОТР / В РЕАЛЬНОМ ВРЕМЕНИ</string>
     <string name="preview_live">LIVE</string>
@@ -25,10 +25,16 @@
     <string name="style_duck_detail">Уточка 3D · крутится по вертикали, голова, клюв и глаза в объёме</string>
     <string name="style_donut">Пончик</string>
     <string name="style_donut_detail">3D-пончик с посыпкой · вращается по вертикали и горизонтали</string>
+    <string name="style_cosmos">Космос</string>
+    <string name="style_cosmos_detail">Сотня звёзд · появляются, гаснут и рождаются в новом месте</string>
+    <string name="style_snow">Снег</string>
+    <string name="style_snow_detail">Снежинки падают вниз · количество, размер и скорость</string>
     <string name="style_fastfetch">Fastfetch</string>
     <string name="style_fastfetch_detail">ASCII-логотип Android и характеристики устройства — читаемым текстом</string>
     <string name="style_android_logo">Android</string>
     <string name="style_android_logo_detail">Тот же ASCII-логотип Android, крупным планом</string>
+    <string name="style_android_3d">Android 3D</string>
+    <string name="style_android_3d_detail">Объёмный робот Android · крутится по горизонтали</string>
     <string name="style_waves">Волны / музыка</string>
     <string name="style_waves_detail">Три волны, настраиваемые биение и ширина, уровень заряда и эквалайзер под музыку</string>
     <string name="style_lock_home">Две обои</string>
@@ -39,7 +45,7 @@
     <string name="section_photo">02 / МЕДИА</string>
     <string name="section_lock_home">02 / ЭКРАН БЛОКИРОВКИ И ДОМАШНИЙ</string>
     <string name="lock_home_title">Слева — блокировка, справа — домашний экран</string>
-    <string name="lock_home_hint">Выберите своё фото, GIF или короткое видео для каждой стороны. При разблокировке картинка сначала сжимается до крупных пикселей, а затем раскрывается уже домашней.</string>
+    <string name="lock_home_hint">Выберите своё фото, GIF или видео для каждой стороны. При разблокировке картинка сначала сжимается до крупных пикселей, а затем раскрывается уже домашней.</string>
     <string name="lock_home_lock">ЭКРАН БЛОКИРОВКИ</string>
     <string name="lock_home_home">ДОМАШНИЙ ЭКРАН</string>
     <string name="lock_home_slot_ready">выбрано</string>
@@ -55,12 +61,12 @@
     <string name="photo_title">Фото, GIF или видео</string>
     <string name="photo_ready">Медиа загружено и применено.</string>
     <string name="photo_missing">Фото или видео ещё не выбрано.</string>
-    <string name="photo_processing">Обрабатываю медиа… Видео может занять несколько секунд.</string>
+    <string name="photo_processing">Обрабатываю медиа… Длинное видео может занять больше времени.</string>
     <string name="photo_processing_button">Обработка…</string>
-    <string name="photo_error">Не удалось обработать этот файл. Попробуйте фото, GIF или короткое видео.</string>
+    <string name="photo_error">Не удалось обработать этот файл. Попробуйте фото, GIF или видео.</string>
     <string name="photo_pick">Выбрать фото / GIF / видео</string>
     <string name="photo_replace">Заменить медиа</string>
-    <string name="photo_hint">Откроется системный выбор. Фото станет чёрно-белым; GIF и видео будут покадрово пересобраны из символов или точек. Короткий ролик до 6 секунд.</string>
+    <string name="photo_hint">Откроется системный выбор. Фото станет чёрно-белым; GIF и видео будут покадрово пересобраны из символов или точек. Видео обрабатывается целиком, от начала до конца.</string>
     <string name="photo_preview_missing">ВЫБЕРИТЕ МЕДИА</string>
     <string name="photo_preview_busy">ОБРАБОТКА…</string>
 
@@ -103,6 +109,36 @@
     <string name="wave_spread_low">уже</string>
     <string name="wave_spread_high">шире</string>
     <string name="wave_spread_hint">Расстояние между тремя лентами в середине экрана. Края остаются общей точкой; 100% — исходное. Крайние волны всегда остаются в нижних трёх четвертях.</string>
+
+    <string name="star_settings_title">Настройки космоса</string>
+    <string name="star_settings_hint">Каждая звезда живёт свой срок: плавно появляется, мерцает, гаснет и рождается в новом месте.</string>
+    <string name="star_count_title">Количество звёзд</string>
+    <string name="star_count_value">%1$d</string>
+    <string name="star_count_low">%1$d</string>
+    <string name="star_count_high">%1$d</string>
+    <string name="star_size_title">Размер звёзд</string>
+    <string name="star_size_value">%1$d%%</string>
+    <string name="star_size_low">мельче</string>
+    <string name="star_size_high">крупнее</string>
+    <string name="star_lifetime_title">Время жизни звезды</string>
+    <string name="star_lifetime_value">%1$d с</string>
+    <string name="star_lifetime_low">%1$d с</string>
+    <string name="star_lifetime_high">%1$d с</string>
+
+    <string name="snow_settings_title">Настройки снега</string>
+    <string name="snow_settings_hint">Снежинки падают сверху вниз, покачиваются и после нижнего края рождаются заново в новом месте.</string>
+    <string name="snow_count_title">Количество снежинок</string>
+    <string name="snow_count_value">%1$d</string>
+    <string name="snow_count_low">%1$d</string>
+    <string name="snow_count_high">%1$d</string>
+    <string name="snow_size_title">Размер снежинок</string>
+    <string name="snow_size_value">%1$d%%</string>
+    <string name="snow_size_low">мельче</string>
+    <string name="snow_size_high">крупнее</string>
+    <string name="snow_speed_title">Скорость снега</string>
+    <string name="snow_speed_value">%1$d%%</string>
+    <string name="snow_speed_low">медленнее</string>
+    <string name="snow_speed_high">быстрее</string>
 
     <string name="real_spectrum_title">Реальный спектр</string>
     <string name="real_spectrum_detail">FFT частот текущего трека. Android запрашивает разрешение RECORD_AUDIO, но микрофон не записывается и звук не сохраняется.</string>

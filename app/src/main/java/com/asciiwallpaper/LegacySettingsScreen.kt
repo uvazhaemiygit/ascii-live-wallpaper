@@ -137,6 +137,78 @@ class LegacySettingsScreen(private val activity: Activity) {
             },
             onCommit = { save() }
         )
+        root.addView(
+            body(
+                "Настройки для стилей «Космос» и «Снег»:",
+                top = 14
+            )
+        )
+        slider(
+            title = activity.getString(R.string.star_count_title),
+            min = WallpaperSettings.MIN_STAR_COUNT,
+            max = WallpaperSettings.MAX_STAR_COUNT,
+            value = current.starCount,
+            format = { activity.getString(R.string.star_count_value, it) },
+            onChange = {
+                current = current.copy(starCount = it).sanitized()
+            },
+            onCommit = { save() }
+        )
+        slider(
+            title = activity.getString(R.string.star_size_title),
+            min = WallpaperSettings.MIN_STAR_SIZE_PERCENT,
+            max = WallpaperSettings.MAX_STAR_SIZE_PERCENT,
+            value = current.starSizePercent,
+            format = { activity.getString(R.string.star_size_value, it) },
+            onChange = {
+                current = current.copy(starSizePercent = it).sanitized()
+            },
+            onCommit = { save() }
+        )
+        slider(
+            title = activity.getString(R.string.star_lifetime_title),
+            min = WallpaperSettings.MIN_STAR_LIFETIME_SECONDS,
+            max = WallpaperSettings.MAX_STAR_LIFETIME_SECONDS,
+            value = current.starLifetimeSeconds,
+            format = { activity.getString(R.string.star_lifetime_value, it) },
+            onChange = {
+                current = current.copy(starLifetimeSeconds = it).sanitized()
+            },
+            onCommit = { save() }
+        )
+        slider(
+            title = activity.getString(R.string.snow_count_title),
+            min = WallpaperSettings.MIN_SNOW_COUNT,
+            max = WallpaperSettings.MAX_SNOW_COUNT,
+            value = current.snowCount,
+            format = { activity.getString(R.string.snow_count_value, it) },
+            onChange = {
+                current = current.copy(snowCount = it).sanitized()
+            },
+            onCommit = { save() }
+        )
+        slider(
+            title = activity.getString(R.string.snow_size_title),
+            min = WallpaperSettings.MIN_SNOW_SIZE_PERCENT,
+            max = WallpaperSettings.MAX_SNOW_SIZE_PERCENT,
+            value = current.snowSizePercent,
+            format = { activity.getString(R.string.snow_size_value, it) },
+            onChange = {
+                current = current.copy(snowSizePercent = it).sanitized()
+            },
+            onCommit = { save() }
+        )
+        slider(
+            title = activity.getString(R.string.snow_speed_title),
+            min = WallpaperSettings.MIN_SNOW_SPEED_PERCENT,
+            max = WallpaperSettings.MAX_SNOW_SPEED_PERCENT,
+            value = current.snowSpeedPercent,
+            format = { activity.getString(R.string.snow_speed_value, it) },
+            onChange = {
+                current = current.copy(snowSpeedPercent = it).sanitized()
+            },
+            onCommit = { save() }
+        )
 
         root.addView(section("04 / ПРОИЗВОДИТЕЛЬНОСТЬ"))
         checkbox(
@@ -634,8 +706,11 @@ class LegacySettingsScreen(private val activity: Activity) {
             ShapeStyle.BLACK_HOLE -> R.string.style_black_hole
             ShapeStyle.DUCK -> R.string.style_duck
             ShapeStyle.DONUT -> R.string.style_donut
+            ShapeStyle.COSMOS -> R.string.style_cosmos
+            ShapeStyle.SNOW -> R.string.style_snow
             ShapeStyle.FASTFETCH -> R.string.style_fastfetch
             ShapeStyle.ANDROID_LOGO -> R.string.style_android_logo
+            ShapeStyle.ANDROID_3D -> R.string.style_android_3d
             ShapeStyle.WAVES -> R.string.style_waves
             ShapeStyle.LOCK_HOME -> R.string.style_lock_home
             ShapeStyle.PHOTO -> R.string.style_photo

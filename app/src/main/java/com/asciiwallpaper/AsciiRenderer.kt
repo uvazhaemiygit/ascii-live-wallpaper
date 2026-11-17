@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.os.BatteryManager
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -44,6 +45,7 @@ class AsciiRenderer(private val context: Context? = null) {
         private const val DUCK_SPEED_SCALE = 1.25f
         private const val DONUT_X_SPEED_SCALE = 1.10f
         private const val DONUT_Y_SPEED_SCALE = 0.78f
+        private const val ANDROID_3D_SPEED_SCALE = 1.45f
         private const val BLACK_HOLE_SPIN_BOOST = 3.0f
         private const val MAX_SCENE_WIDTH = 560
         private const val MAX_SCENE_HEIGHT = 1800
@@ -63,9 +65,12 @@ class AsciiRenderer(private val context: Context? = null) {
     private val blackHoleScene = BlackHoleSceneRenderer()
     private val duckScene = DuckSceneRenderer()
     private val donutScene = DonutSceneRenderer()
+    private val cosmosScene = CosmosSceneRenderer()
+    private val snowScene = SnowSceneRenderer()
     private val waveScene = WaveSceneRenderer()
     private val fastfetchRenderer = FastfetchRenderer(context)
     private val androidLogoRenderer = AndroidLogoRenderer(context)
+    private val robotMesh = RobotMesh.create()
     private val musicSignal = MusicSignal(context)
     private val audioSpectrum = AudioSpectrumSource(context)
     private val realSpectrumLevels = FloatArray(AudioSpectrumSource.BAND_COUNT)
@@ -132,6 +137,7 @@ class AsciiRenderer(private val context: Context? = null) {
     private var duckSpin = 0f
     private var donutSpinX = 34f
     private var donutSpinY = 9f
+    private var robotAngle = 18f
     private var bigCubeOffsetX = 0f
     private var bigCubeOffsetY = 0f
     private var bigCubeFitWidth = -1
@@ -355,9 +361,13 @@ class AsciiRenderer(private val context: Context? = null) {
 
     fun hasAnimatedMedia(): Boolean = mediaFrameSet != null
 
-    /** Playback rate of the imported clip, clamped to a sane range. */
+    /**
+     * Cadence used to schedule frame callbacks. Long videos are cached at a
+     * low effective fps; rounding up (rather than to nearest) keeps their
+     * playback duration from stretching on the wallpaper surface.
+     */
     fun animatedFrameRate(): Int =
-        mediaFrameSet?.fps?.roundToInt()?.coerceIn(1, 30) ?: 12
+        mediaFrameSet?.fps?.let { ceil(it).toInt() }?.coerceIn(1, 30) ?: 12
 
     /** True when either lock/home slot contains a multi-frame clip. */
     fun hasAnimatedLockHomeMedia(): Boolean =
@@ -368,7 +378,7 @@ class AsciiRenderer(private val context: Context? = null) {
     fun lockHomeAnimatedFrameRate(): Int {
         val lockFps = lockMediaFrameSet?.fps ?: 1f
         val homeFps = homeMediaFrameSet?.fps ?: 1f
-        return maxOf(lockFps, homeFps).roundToInt().coerceIn(1, 30)
+        return ceil(maxOf(lockFps, homeFps)).toInt().coerceIn(1, 30)
     }
 
     fun isLockHomeTransitionActive(): Boolean = lockHomeTransitionActive()
@@ -729,6 +739,16 @@ class AsciiRenderer(private val context: Context? = null) {
                 )
             }
 
+            ShapeStyle.ANDROID_3D -> {
+                // Horizontal spin around the vertical axis: the silhouette
+                // compresses and the shaded sides become visible, unlike a
+                // flat 2D logo being squeezed.
+                val boost = spinBoostMultiplier(timeNanos, ShapeStyle.ANDROID_3D)
+                robotAngle = wrapDegrees(
+                    robotAngle + speed * ANDROID_3D_SPEED_SCALE * dt * boost
+                )
+            }
+
             else -> Unit
         }
     }
@@ -876,6 +896,52 @@ class AsciiRenderer(private val context: Context? = null) {
                     excitement = unlockAgeSeconds(timeNanos, ShapeStyle.DONUT)
                         .let { if (it < 0f) 0f else (1f - it / 1.8f).coerceIn(0f, 1f) },
                     lineWidthScale = settings.lineWidth
+                )
+            }
+
+            ShapeStyle.COSMOS -> {
+                cosmosScene.draw(
+                    canvas = canvas,
+                    width = width,
+                    height = height,
+                    columns = columns,
+                    timeSeconds = elapsedSeconds,
+                    starCount = settings.starCount,
+                    starSizePercent = settings.starSizePercent,
+                    lifetimeSeconds = settings.starLifetimeSeconds
+                )
+            }
+
+            ShapeStyle.SNOW -> {
+                snowScene.draw(
+                    canvas = canvas,
+                    width = width,
+                    height = height,
+                    columns = columns,
+                    timeSeconds = elapsedSeconds,
+                    snowCount = settings.snowCount,
+                    snowSizePercent = settings.snowSizePercent,
+                    snowSpeedPercent = settings.snowSpeedPercent
+                )
+            }
+
+            ShapeStyle.ANDROID_3D -> {
+                // The robot is taller than the cube's unit box. In portrait the
+                // width is the useful limit; in landscape cap the height too so
+                // the antennae and feet stay on-screen at every angle.
+                val radius = min(width * 0.68f, height * 0.44f)
+                drawObject(
+                    canvas = canvas,
+                    mesh = robotMesh,
+                    centerX = width * 0.5f,
+                    centerY = height * 0.51f,
+                    radius = radius,
+                    rx = -7f,
+                    ry = robotAngle,
+                    rz = 0f,
+                    drawEdges = false,
+                    outline = true,
+                    edgeWidthScale = 0.72f
                 )
             }
 

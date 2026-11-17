@@ -27,12 +27,14 @@ import kotlin.math.roundToInt
  * Decoding a video or GIF on the live wallpaper render thread is not realistic
  * on a phone: MediaMetadataRetriever is sync/blocking and software GIF
  * decoders allocate a lot. Instead the clip is sampled once at import time
- * into a compact grayscale frame set:
+ * into a compact grayscale frame set.
  *
- *  - at most 72 frames / 6 seconds at 12 fps;
- *  - long side at most 540 px (360 on low-RAM devices);
- *  - one byte per pixel, so a portrait 540p clip occupies up to ~37 MB
- *    (low-RAM devices use 360p, about 17 MB).
+ * The whole clip is sampled, not just its first seconds. A fixed frame budget
+ * keeps the cache bounded: short clips get the full 12 fps, while long clips
+ * are sampled more sparsely and their playback rate is stored so the original
+ * duration is preserved. Resolution is reduced as the frame count grows, and
+ * one byte per pixel keeps the cache practical even for several minutes of
+ * video. On low-RAM devices the budget is lower.
  *
  * The frame set is stored in app-private storage with a tiny binary header.
  * The wallpaper can then draw a frame with no media decoder and no content
@@ -44,13 +46,18 @@ object MediaAsciiStore {
     private const val MAGIC = 0x41534346 // "ASCF"
     private const val VERSION = 1
     private const val TARGET_FPS = 12f
-    private const val MAX_SECONDS = 6f
-    private const val MAX_SECONDS_MS = 6_000
-    private const val MAX_FRAMES = 72
+    private const val MAX_FRAMES = 720
+    private const val MAX_LOW_RAM_FRAMES = 480
     private const val MAX_LONG_SIDE = 540
     private const val LOW_RAM_LONG_SIDE = 360
-    private const val MAX_FRAME_COUNT_READ = 120
+    private const val MAX_FRAME_COUNT_READ = 1200
     private const val MAX_SIDE_READ = 2048
+
+    private data class FramePlan(
+        val count: Int,
+        val fps: Float,
+        val longSide: Int
+    )
 
     data class FrameSet(
         val width: Int,
@@ -191,7 +198,7 @@ object MediaAsciiStore {
                 for (frame in frames) {
                     input.readFully(frame)
                 }
-                FrameSet(width, height, fps.coerceIn(1f, 30f), frames)
+                FrameSet(width, height, fps.coerceIn(0.05f, 30f), frames)
                     .also { cachedFrames[index] = it }
             }
         } catch (t: Throwable) {
@@ -287,24 +294,31 @@ object MediaAsciiStore {
             val durationMs = movie.duration()
             if (durationMs <= 0) return null
 
-            val geometry = targetGeometry(context, sourceWidth, sourceHeight)
+            val plan = framePlan(durationMs.toLong(), context)
+            val geometry = targetGeometry(
+                context,
+                sourceWidth,
+                sourceHeight,
+                plan.longSide
+            )
             val width = geometry.first
             val height = geometry.second
-            val sampleDurationMs = durationMs.coerceAtMost(MAX_SECONDS_MS)
-            val duration = (sampleDurationMs / 1000f)
-                .coerceIn(0.1f, MAX_SECONDS)
-            val count = (duration * TARGET_FPS).roundToInt()
-                .coerceIn(2, MAX_FRAMES)
-            val fps = count / duration.coerceAtLeast(0.1f)
 
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
             val scaleX = width.toFloat() / sourceWidth
             val scaleY = height.toFloat() / sourceHeight
-            val frames = ArrayList<ByteArray>(count)
+            val frames = ArrayList<ByteArray>(plan.count)
+            val lastTimeMs = (durationMs - 1L).coerceAtLeast(0L)
 
-            for (index in 0 until count) {
-                val timeMs = (index * sampleDurationMs / count).coerceAtLeast(0)
+            for (index in 0 until plan.count) {
+                // Include the final frame too. Sampling only the first N
+                // seconds was the old behaviour and made long clips stop.
+                val timeMs = if (plan.count <= 1) 0 else {
+                    (index.toLong() * lastTimeMs / (plan.count - 1))
+                        .coerceAtLeast(0L)
+                        .toInt()
+                }
                 movie.setTime(timeMs)
                 canvas.drawColor(Color.BLACK)
                 canvas.save()
@@ -315,7 +329,7 @@ object MediaAsciiStore {
             }
             bitmap.recycle()
             normalizeFrames(frames)
-            FrameSet(width, height, fps, frames.toTypedArray())
+            FrameSet(width, height, plan.fps, frames.toTypedArray())
         } catch (t: Throwable) {
             Log.w(TAG, "GIF import failed", t)
             null
@@ -338,14 +352,10 @@ object MediaAsciiStore {
             val rotation = retriever.extractMetadata(
                 MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION
             )?.toIntOrNull() ?: 0
-            val durationMs = retriever.extractMetadata(
+            val durationMs = (retriever.extractMetadata(
                 MediaMetadataRetriever.METADATA_KEY_DURATION
-            )?.toLongOrNull() ?: 3000L
-            val sampleDurationMs = durationMs
-                .coerceAtLeast(250L)
-                .coerceAtMost(MAX_SECONDS_MS.toLong())
-            val duration = (sampleDurationMs / 1000f)
-                .coerceIn(0.25f, MAX_SECONDS)
+            )?.toLongOrNull() ?: 3000L).coerceAtLeast(250L)
+            val plan = framePlan(durationMs, context)
 
             val displayWidth = if (rotation == 90 || rotation == 270) {
                 sourceHeight
@@ -357,23 +367,33 @@ object MediaAsciiStore {
             } else {
                 sourceHeight
             }
-            val geometry = targetGeometry(context, displayWidth, displayHeight)
+            val geometry = targetGeometry(
+                context,
+                displayWidth,
+                displayHeight,
+                plan.longSide
+            )
             val width = geometry.first
             val height = geometry.second
             val rawTargetWidth = if (rotation == 90 || rotation == 270) height else width
             val rawTargetHeight = if (rotation == 90 || rotation == 270) width else height
 
-            val count = (duration * TARGET_FPS).roundToInt()
-                .coerceIn(2, MAX_FRAMES)
-            val fps = count / duration.coerceAtLeast(0.1f)
-            val durationUs = (sampleDurationMs * 1000L).coerceAtLeast(1L)
+            val count = plan.count
+            val durationUs = (durationMs * 1000L).coerceAtLeast(1L)
+            val lastTimeUs = (durationUs - 1L).coerceAtLeast(0L)
             val frames = ArrayList<ByteArray>(count)
             val matrix = Matrix().apply {
                 if (rotation != 0) postRotate(rotation.toFloat())
             }
 
             for (index in 0 until count) {
-                val timeUs = (index * durationUs / count).coerceAtLeast(0L)
+                // Span the complete source duration. The final sample is at
+                // the end of the clip, so a long gallery video is not cut off
+                // after its first six seconds any more.
+                val timeUs = if (count <= 1) 0L else {
+                    (index.toLong() * lastTimeUs / (count - 1))
+                        .coerceAtLeast(0L)
+                }
                 val raw = scaledVideoFrame(
                     retriever,
                     timeUs,
@@ -410,7 +430,7 @@ object MediaAsciiStore {
                 frames.add(frames.last().copyOf())
             }
             normalizeFrames(frames)
-            FrameSet(width, height, fps, frames.toTypedArray())
+            FrameSet(width, height, plan.fps, frames.toTypedArray())
         } catch (t: Throwable) {
             Log.w(TAG, "Video import failed", t)
             null
@@ -501,15 +521,50 @@ object MediaAsciiStore {
         return frame
     }
 
+    /**
+     * Chooses a frame budget for the whole clip. We always target 12 fps for
+     * short clips, then reduce the sampling rate so that even a multi-minute
+     * video fits in memory. `fps` is derived from the actual frame count, so
+     * playback lasts exactly as long as the source.
+     */
+    private fun framePlan(durationMs: Long, context: Context): FramePlan {
+        val durationSeconds = (durationMs.coerceAtLeast(250L) / 1000f)
+            .coerceAtLeast(0.25f)
+        val lowRam = isLowRam(context)
+        val maxFrames = if (lowRam) MAX_LOW_RAM_FRAMES else MAX_FRAMES
+        val count = (durationSeconds * TARGET_FPS)
+            .roundToInt()
+            .coerceIn(2, maxFrames)
+        val fps = (count / durationSeconds).coerceIn(0.05f, 30f)
+        val longSide = when {
+            lowRam && count > 360 -> 240
+            lowRam -> LOW_RAM_LONG_SIDE
+            count > 480 -> 288
+            count > 240 -> 360
+            count > 120 -> 480
+            else -> MAX_LONG_SIDE
+        }
+        return FramePlan(count, fps, longSide)
+    }
+
+    private fun isLowRam(context: Context): Boolean {
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE)
+            as? ActivityManager
+        return activityManager?.isLowRamDevice == true
+    }
+
     private fun targetGeometry(
         context: Context,
         sourceWidth: Int,
-        sourceHeight: Int
+        sourceHeight: Int,
+        maxSideOverride: Int? = null
     ): Pair<Int, Int> {
-        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE)
-            as? ActivityManager
-        val lowRam = activityManager?.isLowRamDevice == true
-        val maxSide = if (lowRam) LOW_RAM_LONG_SIDE else MAX_LONG_SIDE
+        val lowRam = isLowRam(context)
+        val maxSide = maxSideOverride ?: if (lowRam) {
+            LOW_RAM_LONG_SIDE
+        } else {
+            MAX_LONG_SIDE
+        }
         val longSide = max(sourceWidth, sourceHeight)
         val scale = if (longSide > maxSide) {
             maxSide.toFloat() / longSide

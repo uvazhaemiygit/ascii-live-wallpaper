@@ -219,6 +219,24 @@ fun SettingsScreen(
     var waveSpread by rememberSaveable {
         mutableIntStateOf(initialSettings.waveSpreadPercent)
     }
+    var starCount by rememberSaveable {
+        mutableIntStateOf(initialSettings.starCount)
+    }
+    var starSize by rememberSaveable {
+        mutableIntStateOf(initialSettings.starSizePercent)
+    }
+    var starLifetime by rememberSaveable {
+        mutableIntStateOf(initialSettings.starLifetimeSeconds)
+    }
+    var snowCount by rememberSaveable {
+        mutableIntStateOf(initialSettings.snowCount)
+    }
+    var snowSize by rememberSaveable {
+        mutableIntStateOf(initialSettings.snowSizePercent)
+    }
+    var snowSpeed by rememberSaveable {
+        mutableIntStateOf(initialSettings.snowSpeedPercent)
+    }
     var realSpectrum by rememberSaveable {
         mutableStateOf(initialSettings.realSpectrumEnabled)
     }
@@ -304,6 +322,12 @@ fun SettingsScreen(
         lineWidth = lineWidth,
         waveBeatPercent = waveBeat,
         waveSpreadPercent = waveSpread,
+        starCount = starCount,
+        starSizePercent = starSize,
+        starLifetimeSeconds = starLifetime,
+        snowCount = snowCount,
+        snowSizePercent = snowSize,
+        snowSpeedPercent = snowSpeed,
         realSpectrumEnabled = realSpectrum,
         unlockAnimationEnabled = unlockAnimationEnabled,
         photoRevision = photoRevision,
@@ -674,6 +698,20 @@ fun SettingsScreen(
                         onClick = { selectStyle(ShapeStyle.DONUT) }
                     )
                     StyleOption(
+                        title = stringResource(R.string.style_cosmos),
+                        detail = stringResource(R.string.style_cosmos_detail),
+                        tag = "COSMOS",
+                        selected = style == ShapeStyle.COSMOS,
+                        onClick = { selectStyle(ShapeStyle.COSMOS) }
+                    )
+                    StyleOption(
+                        title = stringResource(R.string.style_snow),
+                        detail = stringResource(R.string.style_snow_detail),
+                        tag = "SNOW",
+                        selected = style == ShapeStyle.SNOW,
+                        onClick = { selectStyle(ShapeStyle.SNOW) }
+                    )
+                    StyleOption(
                         title = stringResource(R.string.style_fastfetch),
                         detail = stringResource(R.string.style_fastfetch_detail),
                         tag = "SYSINFO",
@@ -686,6 +724,13 @@ fun SettingsScreen(
                         tag = "ANDROID",
                         selected = style == ShapeStyle.ANDROID_LOGO,
                         onClick = { selectStyle(ShapeStyle.ANDROID_LOGO) }
+                    )
+                    StyleOption(
+                        title = stringResource(R.string.style_android_3d),
+                        detail = stringResource(R.string.style_android_3d_detail),
+                        tag = "ANDROID 3D",
+                        selected = style == ShapeStyle.ANDROID_3D,
+                        onClick = { selectStyle(ShapeStyle.ANDROID_3D) }
                     )
                     StyleOption(
                         title = stringResource(R.string.style_waves),
@@ -708,6 +753,184 @@ fun SettingsScreen(
                         selected = style == ShapeStyle.PHOTO,
                         onClick = { selectStyle(ShapeStyle.PHOTO) }
                     )
+
+                    if (style == ShapeStyle.COSMOS) {
+                        Spacer(Modifier.height(20.dp))
+                        Text(
+                            text = stringResource(R.string.star_settings_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.star_settings_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextMuted
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        LabelWithValue(
+                            title = stringResource(R.string.star_count_title),
+                            value = stringResource(R.string.star_count_value, starCount)
+                        )
+                        Slider(
+                            value = starCount.toFloat(),
+                            onValueChange = { starCount = it.roundToInt() },
+                            onValueChangeFinished = {
+                                commit(currentSettings.copy(starCount = starCount))
+                            },
+                            valueRange = WallpaperSettings.MIN_STAR_COUNT.toFloat()..
+                                WallpaperSettings.MAX_STAR_COUNT.toFloat(),
+                            steps = 27,
+                            colors = asciiSliderColors()
+                        )
+                        SliderLimits(
+                            start = stringResource(
+                                R.string.star_count_low,
+                                WallpaperSettings.MIN_STAR_COUNT
+                            ),
+                            end = stringResource(
+                                R.string.star_count_high,
+                                WallpaperSettings.MAX_STAR_COUNT
+                            )
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        LabelWithValue(
+                            title = stringResource(R.string.star_size_title),
+                            value = stringResource(R.string.star_size_value, starSize)
+                        )
+                        Slider(
+                            value = starSize.toFloat(),
+                            onValueChange = { starSize = it.roundToInt() },
+                            onValueChangeFinished = {
+                                commit(currentSettings.copy(starSizePercent = starSize))
+                            },
+                            valueRange = WallpaperSettings.MIN_STAR_SIZE_PERCENT.toFloat()..
+                                WallpaperSettings.MAX_STAR_SIZE_PERCENT.toFloat(),
+                            steps = 19,
+                            colors = asciiSliderColors()
+                        )
+                        SliderLimits(
+                            start = stringResource(R.string.star_size_low),
+                            end = stringResource(R.string.star_size_high)
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        LabelWithValue(
+                            title = stringResource(R.string.star_lifetime_title),
+                            value = stringResource(
+                                R.string.star_lifetime_value,
+                                starLifetime
+                            )
+                        )
+                        Slider(
+                            value = starLifetime.toFloat(),
+                            onValueChange = { starLifetime = it.roundToInt() },
+                            onValueChangeFinished = {
+                                commit(currentSettings.copy(
+                                    starLifetimeSeconds = starLifetime
+                                ))
+                            },
+                            valueRange =
+                                WallpaperSettings.MIN_STAR_LIFETIME_SECONDS.toFloat()..
+                                    WallpaperSettings.MAX_STAR_LIFETIME_SECONDS.toFloat(),
+                            steps = 28,
+                            colors = asciiSliderColors()
+                        )
+                        SliderLimits(
+                            start = stringResource(
+                                R.string.star_lifetime_low,
+                                WallpaperSettings.MIN_STAR_LIFETIME_SECONDS
+                            ),
+                            end = stringResource(
+                                R.string.star_lifetime_high,
+                                WallpaperSettings.MAX_STAR_LIFETIME_SECONDS
+                            )
+                        )
+                    }
+
+                    if (style == ShapeStyle.SNOW) {
+                        Spacer(Modifier.height(20.dp))
+                        Text(
+                            text = stringResource(R.string.snow_settings_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.snow_settings_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextMuted
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        LabelWithValue(
+                            title = stringResource(R.string.snow_count_title),
+                            value = stringResource(R.string.snow_count_value, snowCount)
+                        )
+                        Slider(
+                            value = snowCount.toFloat(),
+                            onValueChange = { snowCount = it.roundToInt() },
+                            onValueChangeFinished = {
+                                commit(currentSettings.copy(snowCount = snowCount))
+                            },
+                            valueRange = WallpaperSettings.MIN_SNOW_COUNT.toFloat()..
+                                WallpaperSettings.MAX_SNOW_COUNT.toFloat(),
+                            steps = 27,
+                            colors = asciiSliderColors()
+                        )
+                        SliderLimits(
+                            start = stringResource(
+                                R.string.snow_count_low,
+                                WallpaperSettings.MIN_SNOW_COUNT
+                            ),
+                            end = stringResource(
+                                R.string.snow_count_high,
+                                WallpaperSettings.MAX_SNOW_COUNT
+                            )
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        LabelWithValue(
+                            title = stringResource(R.string.snow_size_title),
+                            value = stringResource(R.string.snow_size_value, snowSize)
+                        )
+                        Slider(
+                            value = snowSize.toFloat(),
+                            onValueChange = { snowSize = it.roundToInt() },
+                            onValueChangeFinished = {
+                                commit(currentSettings.copy(
+                                    snowSizePercent = snowSize
+                                ))
+                            },
+                            valueRange = WallpaperSettings.MIN_SNOW_SIZE_PERCENT.toFloat()..
+                                WallpaperSettings.MAX_SNOW_SIZE_PERCENT.toFloat(),
+                            steps = 19,
+                            colors = asciiSliderColors()
+                        )
+                        SliderLimits(
+                            start = stringResource(R.string.snow_size_low),
+                            end = stringResource(R.string.snow_size_high)
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        LabelWithValue(
+                            title = stringResource(R.string.snow_speed_title),
+                            value = stringResource(R.string.snow_speed_value, snowSpeed)
+                        )
+                        Slider(
+                            value = snowSpeed.toFloat(),
+                            onValueChange = { snowSpeed = it.roundToInt() },
+                            onValueChangeFinished = {
+                                commit(currentSettings.copy(
+                                    snowSpeedPercent = snowSpeed
+                                ))
+                            },
+                            valueRange = WallpaperSettings.MIN_SNOW_SPEED_PERCENT.toFloat()..
+                                WallpaperSettings.MAX_SNOW_SPEED_PERCENT.toFloat(),
+                            steps = 54,
+                            colors = asciiSliderColors()
+                        )
+                        SliderLimits(
+                            start = stringResource(R.string.snow_speed_low),
+                            end = stringResource(R.string.snow_speed_high)
+                        )
+                    }
                 }
 
                 if (style == ShapeStyle.PHOTO) {
@@ -1233,7 +1456,7 @@ fun SettingsScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "ASCII LIVE WALLPAPER  /  v1.7.1",
+                    text = "ASCII LIVE WALLPAPER  /  v1.8.0",
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted.copy(alpha = 0.55f),
@@ -1854,8 +2077,11 @@ private fun previewStyleBadge(style: ShapeStyle): String = when (style) {
     ShapeStyle.BLACK_HOLE -> "EVENT HORIZON"
     ShapeStyle.DUCK -> "ЕБАЛО УТИНОЕ / 3D"
     ShapeStyle.DONUT -> "ПОНЧИК / 3D"
+    ShapeStyle.COSMOS -> "COSMOS / STARS"
+    ShapeStyle.SNOW -> "SNOW / FALL"
     ShapeStyle.FASTFETCH -> "FASTFETCH"
     ShapeStyle.ANDROID_LOGO -> "ANDROID ASCII"
+    ShapeStyle.ANDROID_3D -> "ANDROID 3D"
     ShapeStyle.WAVES -> "WAVES / AUDIO"
     ShapeStyle.LOCK_HOME -> "LOCK / HOME"
     ShapeStyle.PHOTO -> "MEDIA"

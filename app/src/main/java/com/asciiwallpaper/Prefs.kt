@@ -12,8 +12,11 @@ enum class ShapeStyle(val prefValue: String) {
     BLACK_HOLE("black_hole"),
     DUCK("duck"),
     DONUT("donut"),
+    COSMOS("cosmos"),
+    SNOW("snow"),
     FASTFETCH("fastfetch"),
     ANDROID_LOGO("android_logo"),
+    ANDROID_3D("android_3d"),
     WAVES("waves"),
     LOCK_HOME("lock_home"),
     PHOTO("photo");
@@ -104,6 +107,21 @@ data class WallpaperSettings(
      * shared.
      */
     val waveSpreadPercent: Int = DEFAULT_WAVE_SPREAD_PERCENT,
+    /** Number of stars in the Cosmos scene. */
+    val starCount: Int = DEFAULT_STAR_COUNT,
+    /** Star radius, where 100 % is the hand-tuned default. */
+    val starSizePercent: Int = DEFAULT_STAR_SIZE_PERCENT,
+    /**
+     * How long one star stays in place before it fades out and respawns
+     * elsewhere. The default is one minute.
+     */
+    val starLifetimeSeconds: Int = DEFAULT_STAR_LIFETIME_SECONDS,
+    /** Number of falling snowflakes in the Snow scene. */
+    val snowCount: Int = DEFAULT_SNOW_COUNT,
+    /** Snowflake radius, where 100 % is the hand-tuned default. */
+    val snowSizePercent: Int = DEFAULT_SNOW_SIZE_PERCENT,
+    /** Snowfall speed, where 100 % is the hand-tuned default. */
+    val snowSpeedPercent: Int = DEFAULT_SNOW_SPEED_PERCENT,
     /**
      * Opt-in real FFT visualization. It uses Android's Visualizer effect on
      * the global output mix. RECORD_AUDIO is required by the platform, but no
@@ -152,6 +170,24 @@ data class WallpaperSettings(
             MIN_WAVE_SPREAD_PERCENT,
             MAX_WAVE_SPREAD_PERCENT
         ),
+        starCount = starCount.coerceIn(MIN_STAR_COUNT, MAX_STAR_COUNT),
+        starSizePercent = starSizePercent.coerceIn(
+            MIN_STAR_SIZE_PERCENT,
+            MAX_STAR_SIZE_PERCENT
+        ),
+        starLifetimeSeconds = starLifetimeSeconds.coerceIn(
+            MIN_STAR_LIFETIME_SECONDS,
+            MAX_STAR_LIFETIME_SECONDS
+        ),
+        snowCount = snowCount.coerceIn(MIN_SNOW_COUNT, MAX_SNOW_COUNT),
+        snowSizePercent = snowSizePercent.coerceIn(
+            MIN_SNOW_SIZE_PERCENT,
+            MAX_SNOW_SIZE_PERCENT
+        ),
+        snowSpeedPercent = snowSpeedPercent.coerceIn(
+            MIN_SNOW_SPEED_PERCENT,
+            MAX_SNOW_SPEED_PERCENT
+        ),
         lockHomeTransitionMs = lockHomeTransitionMs.coerceIn(
             MIN_LOCK_HOME_TRANSITION_MS,
             MAX_LOCK_HOME_TRANSITION_MS
@@ -171,6 +207,24 @@ data class WallpaperSettings(
         const val MIN_WAVE_SPREAD_PERCENT = 50
         const val MAX_WAVE_SPREAD_PERCENT = 150
         const val DEFAULT_WAVE_SPREAD_PERCENT = 100
+        const val MIN_STAR_COUNT = 20
+        const val MAX_STAR_COUNT = 300
+        const val DEFAULT_STAR_COUNT = 100
+        const val MIN_STAR_SIZE_PERCENT = 50
+        const val MAX_STAR_SIZE_PERCENT = 250
+        const val DEFAULT_STAR_SIZE_PERCENT = 100
+        const val MIN_STAR_LIFETIME_SECONDS = 10
+        const val MAX_STAR_LIFETIME_SECONDS = 300
+        const val DEFAULT_STAR_LIFETIME_SECONDS = 60
+        const val MIN_SNOW_COUNT = 20
+        const val MAX_SNOW_COUNT = 300
+        const val DEFAULT_SNOW_COUNT = 100
+        const val MIN_SNOW_SIZE_PERCENT = 50
+        const val MAX_SNOW_SIZE_PERCENT = 250
+        const val DEFAULT_SNOW_SIZE_PERCENT = 100
+        const val MIN_SNOW_SPEED_PERCENT = 25
+        const val MAX_SNOW_SPEED_PERCENT = 300
+        const val DEFAULT_SNOW_SPEED_PERCENT = 100
         const val MIN_GLYPH_OPACITY_PERCENT = 10
         const val MAX_GLYPH_OPACITY_PERCENT = 100
         const val DEFAULT_GLYPH_OPACITY_PERCENT = 100
@@ -214,6 +268,12 @@ object Prefs {
     // "wave height" to "wave beat".
     private const val KEY_WAVE_BEAT = "wave_height_percent"
     private const val KEY_WAVE_SPREAD = "wave_spread_percent"
+    private const val KEY_STAR_COUNT = "star_count"
+    private const val KEY_STAR_SIZE_PERCENT = "star_size_percent"
+    private const val KEY_STAR_LIFETIME_SECONDS = "star_lifetime_seconds"
+    private const val KEY_SNOW_COUNT = "snow_count"
+    private const val KEY_SNOW_SIZE_PERCENT = "snow_size_percent"
+    private const val KEY_SNOW_SPEED_PERCENT = "snow_speed_percent"
     private const val KEY_REAL_SPECTRUM = "real_spectrum_enabled"
     private const val KEY_UNLOCK_ANIMATION = "unlock_animation"
     private const val KEY_PHOTO_REVISION = "photo_revision"
@@ -240,6 +300,12 @@ object Prefs {
         KEY_LINE_WIDTH,
         KEY_WAVE_BEAT,
         KEY_WAVE_SPREAD,
+        KEY_STAR_COUNT,
+        KEY_STAR_SIZE_PERCENT,
+        KEY_STAR_LIFETIME_SECONDS,
+        KEY_SNOW_COUNT,
+        KEY_SNOW_SIZE_PERCENT,
+        KEY_SNOW_SPEED_PERCENT,
         KEY_REAL_SPECTRUM,
         KEY_UNLOCK_ANIMATION,
         KEY_PHOTO_REVISION,
@@ -294,6 +360,30 @@ object Prefs {
                 KEY_WAVE_SPREAD,
                 WallpaperSettings.DEFAULT_WAVE_SPREAD_PERCENT
             ),
+            starCount = p.getInt(
+                KEY_STAR_COUNT,
+                WallpaperSettings.DEFAULT_STAR_COUNT
+            ),
+            starSizePercent = p.getInt(
+                KEY_STAR_SIZE_PERCENT,
+                WallpaperSettings.DEFAULT_STAR_SIZE_PERCENT
+            ),
+            starLifetimeSeconds = p.getInt(
+                KEY_STAR_LIFETIME_SECONDS,
+                WallpaperSettings.DEFAULT_STAR_LIFETIME_SECONDS
+            ),
+            snowCount = p.getInt(
+                KEY_SNOW_COUNT,
+                WallpaperSettings.DEFAULT_SNOW_COUNT
+            ),
+            snowSizePercent = p.getInt(
+                KEY_SNOW_SIZE_PERCENT,
+                WallpaperSettings.DEFAULT_SNOW_SIZE_PERCENT
+            ),
+            snowSpeedPercent = p.getInt(
+                KEY_SNOW_SPEED_PERCENT,
+                WallpaperSettings.DEFAULT_SNOW_SPEED_PERCENT
+            ),
             realSpectrumEnabled = p.getBoolean(KEY_REAL_SPECTRUM, false),
             unlockAnimationEnabled = p.getBoolean(KEY_UNLOCK_ANIMATION, true),
             photoRevision = p.getInt(KEY_PHOTO_REVISION, 0),
@@ -325,6 +415,12 @@ object Prefs {
             .putFloat(KEY_LINE_WIDTH, clean.lineWidth)
             .putInt(KEY_WAVE_BEAT, clean.waveBeatPercent)
             .putInt(KEY_WAVE_SPREAD, clean.waveSpreadPercent)
+            .putInt(KEY_STAR_COUNT, clean.starCount)
+            .putInt(KEY_STAR_SIZE_PERCENT, clean.starSizePercent)
+            .putInt(KEY_STAR_LIFETIME_SECONDS, clean.starLifetimeSeconds)
+            .putInt(KEY_SNOW_COUNT, clean.snowCount)
+            .putInt(KEY_SNOW_SIZE_PERCENT, clean.snowSizePercent)
+            .putInt(KEY_SNOW_SPEED_PERCENT, clean.snowSpeedPercent)
             .putBoolean(KEY_REAL_SPECTRUM, clean.realSpectrumEnabled)
             .putBoolean(KEY_UNLOCK_ANIMATION, clean.unlockAnimationEnabled)
             .putInt(KEY_PHOTO_REVISION, clean.photoRevision)
