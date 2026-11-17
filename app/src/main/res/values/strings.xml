@@ -123,14 +123,19 @@
     <string name="auto_performance_toggle_description">Включить или выключить автоматическую производительность</string>
 
     <string name="static_wallpaper_title">Статичная копия для прозрачных виджетов</string>
-    <string name="static_wallpaper_detail">Прозрачность виджетов Nothing работает только со статичными обоями. Кнопка сохранит текущий кадр как обычные обои, и анимация остановится.</string>
+    <string name="static_wallpaper_detail">Прозрачность виджетов Nothing работает только со статичными обоями. Кнопка сохранит текущий кадр как обычные обои, и анимация остановится. Если эффект не появился, установите тот же кадр через системный выбор обоев.</string>
     <string name="static_wallpaper_button">Сделать статичную копию</string>
     <string name="static_wallpaper_working">Устанавливаю статичную копию…</string>
     <string name="static_wallpaper_confirm_title">Остановить анимацию?</string>
-    <string name="static_wallpaper_confirm_message">Текущий кадр станет обычными статичными обоями. Это включит прозрачность виджетов Nothing, но живые волны, кубы и музыкальная анимация остановятся. Вернуть живые обои можно кнопкой «Установить обои».</string>
+    <string name="static_wallpaper_confirm_message">Текущий кадр станет обычными статичными обоями на домашнем экране и экране блокировки, а живые волны, кубы и музыкальная анимация остановятся. На Nothing OS прозрачность виджетов иногда включается только после установки через «Обои и стиль»: для этого ниже есть отдельная кнопка системного выбора. Вернуть живые обои можно кнопкой «Установить обои».</string>
     <string name="static_wallpaper_confirm_yes">Установить копию</string>
-    <string name="static_wallpaper_done">Статичная копия установлена. Прозрачные виджеты должны снова работать.</string>
+    <string name="static_wallpaper_done">Статичная копия установлена. Если прозрачность виджетов не появилась, откройте её через системный выбор обоев.</string>
     <string name="static_wallpaper_failed">Не удалось установить статичную копию: %1$s</string>
+    <string name="static_wallpaper_picker_button">Открыть системный выбор обоев</string>
+    <string name="static_wallpaper_picker_working">Готовлю кадр для системного выбора…</string>
+    <string name="static_wallpaper_picker_hint">Если блюр на виджетах Nothing не появился, нажмите эту кнопку и установите PNG через «Обои и стиль». Nothing применяет свой эффект к изображению, выбранному системным приложением, а не к кадру, установленному напрямую.</string>
+    <string name="static_wallpaper_picker_title">Установить статичные обои</string>
+    <string name="static_wallpaper_picker_opened">Выберите «Домой» и «Экран блокировки» в открывшемся системном окне.</string>
     <string name="static_wallpaper_cancel">Отмена</string>
 
     <string name="section_lines">04 / ЛИНИИ</string>

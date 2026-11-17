@@ -58,6 +58,17 @@
             android:label="@string/app_name"
             android:theme="@style/Theme.AsciiWallpaper" />
 
+        <!-- Shares the temporary PNG with the OEM wallpaper picker. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.asciiwallpaper.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!--
             BIND_WALLPAPER is a signature permission held by the system. It is
             enforced here as the service permission; apps must not request it.

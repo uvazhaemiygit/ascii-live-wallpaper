@@ -284,6 +284,7 @@ fun SettingsScreen(
     var showBackgroundColorPicker by rememberSaveable { mutableStateOf(false) }
     var showStaticWallpaperDialog by rememberSaveable { mutableStateOf(false) }
     var staticWallpaperBusy by remember { mutableStateOf(false) }
+    var staticPickerBusy by remember { mutableStateOf(false) }
     val photoScope = rememberCoroutineScope()
 
     val style = remember(styleValue) { ShapeStyle.fromValue(styleValue) }
@@ -320,7 +321,7 @@ fun SettingsScreen(
     }
 
     fun exportStaticWallpaper() {
-        if (staticWallpaperBusy) return
+        if (staticWallpaperBusy || staticPickerBusy) return
         showStaticWallpaperDialog = false
         staticWallpaperBusy = true
         val exportSettings = PerformancePolicy.effective(
@@ -334,6 +335,48 @@ fun SettingsScreen(
             staticWallpaperBusy = false
             val message = result.fold(
                 onSuccess = { context.getString(R.string.static_wallpaper_done) },
+                onFailure = {
+                    context.getString(
+                        R.string.static_wallpaper_failed,
+                        it.message ?: it.javaClass.simpleName
+                    )
+                }
+            )
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun openSystemWallpaperPicker() {
+        if (staticWallpaperBusy || staticPickerBusy) return
+        staticPickerBusy = true
+        val exportSettings = PerformancePolicy.effective(
+            currentSettings,
+            appContext
+        )
+        photoScope.launch {
+            val renderResult = withContext(Dispatchers.Default) {
+                StaticWallpaper.exportPng(appContext, exportSettings)
+            }
+            if (renderResult.isFailure) {
+                staticPickerBusy = false
+                val error = renderResult.exceptionOrNull()
+                Toast.makeText(
+                    context,
+                    context.getString(
+                        R.string.static_wallpaper_failed,
+                        error?.message ?: error?.javaClass?.simpleName ?: "PNG"
+                    ),
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+
+            val launchResult = StaticWallpaper.openSystemPicker(appContext)
+            staticPickerBusy = false
+            val message = launchResult.fold(
+                onSuccess = {
+                    context.getString(R.string.static_wallpaper_picker_opened)
+                },
                 onFailure = {
                     context.getString(
                         R.string.static_wallpaper_failed,
@@ -1129,7 +1172,7 @@ fun SettingsScreen(
                     )
                     TextButton(
                         onClick = { showStaticWallpaperDialog = true },
-                        enabled = !staticWallpaperBusy,
+                        enabled = !staticWallpaperBusy && !staticPickerBusy,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
@@ -1144,11 +1187,39 @@ fun SettingsScreen(
                             color = if (staticWallpaperBusy) TextMuted else AccentGreen
                         )
                     }
+                    TextButton(
+                        onClick = { openSystemWallpaperPicker() },
+                        enabled = !staticWallpaperBusy && !staticPickerBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = stringResource(
+                                if (staticPickerBusy) {
+                                    R.string.static_wallpaper_picker_working
+                                } else {
+                                    R.string.static_wallpaper_picker_button
+                                }
+                            ),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (staticPickerBusy) {
+                                TextMuted
+                            } else {
+                                AccentGreen.copy(alpha = 0.86f)
+                            }
+                        )
+                    }
                     Text(
                         text = stringResource(R.string.static_wallpaper_detail),
                         modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.bodySmall,
                         color = TextMuted,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = stringResource(R.string.static_wallpaper_picker_hint),
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMuted.copy(alpha = 0.78f),
                         textAlign = TextAlign.Center
                     )
                 }
@@ -1162,7 +1233,7 @@ fun SettingsScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "ASCII LIVE WALLPAPER  /  v1.7.0",
+                    text = "ASCII LIVE WALLPAPER  /  v1.7.1",
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted.copy(alpha = 0.55f),

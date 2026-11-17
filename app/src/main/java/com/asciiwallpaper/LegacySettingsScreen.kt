@@ -250,6 +250,19 @@ class LegacySettingsScreen(private val activity: Activity) {
                 gravity = Gravity.CENTER
             )
         )
+        button(
+            activity.getString(R.string.static_wallpaper_picker_button),
+            secondary = true
+        ) {
+            openSystemWallpaperPicker()
+        }
+        root.addView(
+            body(
+                activity.getString(R.string.static_wallpaper_picker_hint),
+                top = 6,
+                gravity = Gravity.CENTER
+            )
+        )
         root.addView(
             body(
                 activity.getString(R.string.settings_live_note),
@@ -315,6 +328,53 @@ class LegacySettingsScreen(private val activity: Activity) {
                 val message = result.fold(
                     onSuccess = {
                         activity.getString(R.string.static_wallpaper_done)
+                    },
+                    onFailure = {
+                        activity.getString(
+                            R.string.static_wallpaper_failed,
+                            it.message ?: it.javaClass.simpleName
+                        )
+                    }
+                )
+                Toast.makeText(activity, message, Toast.LENGTH_LONG).show()
+            }
+        }.start()
+    }
+
+    private fun openSystemWallpaperPicker() {
+        val settings = PerformancePolicy.effective(current, activity)
+        Toast.makeText(
+            activity,
+            R.string.static_wallpaper_picker_working,
+            Toast.LENGTH_SHORT
+        ).show()
+        Thread {
+            val renderResult = StaticWallpaper.exportPng(
+                activity.applicationContext,
+                settings
+            )
+            activity.runOnUiThread {
+                if (renderResult.isFailure) {
+                    val error = renderResult.exceptionOrNull()
+                    Toast.makeText(
+                        activity,
+                        activity.getString(
+                            R.string.static_wallpaper_failed,
+                            error?.message
+                                ?: error?.javaClass?.simpleName
+                                ?: "PNG"
+                        ),
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@runOnUiThread
+                }
+
+                val launchResult = StaticWallpaper.openSystemPicker(
+                    activity.applicationContext
+                )
+                val message = launchResult.fold(
+                    onSuccess = {
+                        activity.getString(R.string.static_wallpaper_picker_opened)
                     },
                     onFailure = {
                         activity.getString(
