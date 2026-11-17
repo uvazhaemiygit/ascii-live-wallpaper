@@ -710,7 +710,6 @@ class LegacySettingsScreen(private val activity: Activity) {
             ShapeStyle.SNOW -> R.string.style_snow
             ShapeStyle.FASTFETCH -> R.string.style_fastfetch
             ShapeStyle.ANDROID_LOGO -> R.string.style_android_logo
-            ShapeStyle.ANDROID_3D -> R.string.style_android_3d
             ShapeStyle.WAVES -> R.string.style_waves
             ShapeStyle.LOCK_HOME -> R.string.style_lock_home
             ShapeStyle.PHOTO -> R.string.style_photo

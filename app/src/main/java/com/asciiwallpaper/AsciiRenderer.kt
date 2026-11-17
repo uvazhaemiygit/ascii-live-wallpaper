@@ -45,7 +45,6 @@ class AsciiRenderer(private val context: Context? = null) {
         private const val DUCK_SPEED_SCALE = 1.25f
         private const val DONUT_X_SPEED_SCALE = 1.10f
         private const val DONUT_Y_SPEED_SCALE = 0.78f
-        private const val ANDROID_3D_SPEED_SCALE = 1.45f
         private const val BLACK_HOLE_SPIN_BOOST = 3.0f
         private const val MAX_SCENE_WIDTH = 560
         private const val MAX_SCENE_HEIGHT = 1800
@@ -70,7 +69,6 @@ class AsciiRenderer(private val context: Context? = null) {
     private val waveScene = WaveSceneRenderer()
     private val fastfetchRenderer = FastfetchRenderer(context)
     private val androidLogoRenderer = AndroidLogoRenderer(context)
-    private val robotMesh = RobotMesh.create()
     private val musicSignal = MusicSignal(context)
     private val audioSpectrum = AudioSpectrumSource(context)
     private val realSpectrumLevels = FloatArray(AudioSpectrumSource.BAND_COUNT)
@@ -137,7 +135,6 @@ class AsciiRenderer(private val context: Context? = null) {
     private var duckSpin = 0f
     private var donutSpinX = 34f
     private var donutSpinY = 9f
-    private var robotAngle = 18f
     private var bigCubeOffsetX = 0f
     private var bigCubeOffsetY = 0f
     private var bigCubeFitWidth = -1
@@ -739,16 +736,6 @@ class AsciiRenderer(private val context: Context? = null) {
                 )
             }
 
-            ShapeStyle.ANDROID_3D -> {
-                // Horizontal spin around the vertical axis: the silhouette
-                // compresses and the shaded sides become visible, unlike a
-                // flat 2D logo being squeezed.
-                val boost = spinBoostMultiplier(timeNanos, ShapeStyle.ANDROID_3D)
-                robotAngle = wrapDegrees(
-                    robotAngle + speed * ANDROID_3D_SPEED_SCALE * dt * boost
-                )
-            }
-
             else -> Unit
         }
     }
@@ -922,26 +909,6 @@ class AsciiRenderer(private val context: Context? = null) {
                     snowCount = settings.snowCount,
                     snowSizePercent = settings.snowSizePercent,
                     snowSpeedPercent = settings.snowSpeedPercent
-                )
-            }
-
-            ShapeStyle.ANDROID_3D -> {
-                // The robot is taller than the cube's unit box. In portrait the
-                // width is the useful limit; in landscape cap the height too so
-                // the antennae and feet stay on-screen at every angle.
-                val radius = min(width * 0.68f, height * 0.44f)
-                drawObject(
-                    canvas = canvas,
-                    mesh = robotMesh,
-                    centerX = width * 0.5f,
-                    centerY = height * 0.51f,
-                    radius = radius,
-                    rx = -7f,
-                    ry = robotAngle,
-                    rz = 0f,
-                    drawEdges = false,
-                    outline = true,
-                    edgeWidthScale = 0.72f
                 )
             }
 

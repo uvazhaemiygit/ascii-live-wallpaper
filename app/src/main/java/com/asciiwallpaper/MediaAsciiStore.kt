@@ -66,6 +66,44 @@ object MediaAsciiStore {
         val frames: Array<ByteArray>
     )
 
+    /**
+     * Coarse, real progress from the import pipeline. The frame counters are
+     * the actual sampled frames, so the UI can show how much of the clip has
+     * already been decoded instead of an invented animation.
+     */
+    data class ImportProgress(
+        val percent: Int,
+        val completedFrames: Int,
+        val totalFrames: Int
+    )
+
+    private class ProgressSink(
+        private val callback: ((ImportProgress) -> Unit)?
+    ) {
+        private var lastPercent = -1
+        private var lastTotal = -1
+
+        fun report(
+            percent: Int,
+            completedFrames: Int = 0,
+            totalFrames: Int = 0,
+            force: Boolean = false
+        ) {
+            val total = totalFrames.coerceAtLeast(0)
+            val safePercent = percent.coerceIn(0, 100)
+            if (!force && safePercent == lastPercent && total == lastTotal) return
+            lastPercent = safePercent
+            lastTotal = total
+            callback?.invoke(
+                ImportProgress(
+                    percent = safePercent,
+                    completedFrames = completedFrames.coerceIn(0, total),
+                    totalFrames = total
+                )
+            )
+        }
+    }
+
     sealed interface ImportResult {
         data class Still(val revision: Int) : ImportResult
         data class Animated(val revision: Int) : ImportResult
@@ -103,8 +141,12 @@ object MediaAsciiStore {
     fun import(
         context: Context,
         uri: Uri,
-        slot: MediaSlot = MediaSlot.MAIN
+        slot: MediaSlot = MediaSlot.MAIN,
+        onProgress: ((ImportProgress) -> Unit)? = null
     ): ImportResult? {
+        val progress = ProgressSink(onProgress)
+        progress.report(0, force = true)
+
         val resolver = context.contentResolver
         val mime = try {
             resolver.getType(uri).orEmpty().lowercase()
@@ -137,24 +179,26 @@ object MediaAsciiStore {
             name.endsWith(".3gp") ||
             name.endsWith(".avi")
         if (mime.startsWith("video/") || videoByName) {
-            val frames = extractVideo(context, uri) ?: return null
-            return installAnimated(context, frames, slot)
+            val frames = extractVideo(context, uri, progress) ?: return null
+            return installAnimated(context, frames, slot, progress)
         }
 
         if (mime == "image/gif" || name.endsWith(".gif")) {
-            val frames = extractGif(context, uri)
+            val frames = extractGif(context, uri, progress)
             if (frames != null && frames.frames.size >= 2) {
-                return installAnimated(context, frames, slot)
+                return installAnimated(context, frames, slot, progress)
             }
             // A one-frame GIF is just a still image. Let the still importer
             // use its EXIF/color/auto-contrast pipeline.
             val revision = PhotoAsciiStore.import(context, uri, slot) ?: return null
+            progress.report(100, force = true)
             return ImportResult.Still(revision)
         }
 
         // Ordinary image (including a one-frame WebP) that the still importer
         // can handle.
         val revision = PhotoAsciiStore.import(context, uri, slot) ?: return null
+        progress.report(100, force = true)
         return ImportResult.Still(revision)
     }
 
@@ -232,21 +276,35 @@ object MediaAsciiStore {
     private fun installAnimated(
         context: Context,
         frameSet: FrameSet,
-        slot: MediaSlot
+        slot: MediaSlot,
+        progress: ProgressSink
     ): ImportResult? {
         if (frameSet.frames.isEmpty()) return null
         val target = file(context, slot)
         val temporary = File(context.filesDir, "${fileName(slot)}.tmp")
 
         return try {
+            val count = frameSet.frames.size
+            progress.report(90, 0, count, force = true)
             DataOutputStream(BufferedOutputStream(FileOutputStream(temporary))).use { output ->
                 output.writeInt(MAGIC)
                 output.writeInt(VERSION)
                 output.writeInt(frameSet.width)
                 output.writeInt(frameSet.height)
                 output.writeInt((frameSet.fps * 1000f).roundToInt())
-                output.writeInt(frameSet.frames.size)
-                for (frame in frameSet.frames) output.write(frame)
+                output.writeInt(count)
+                for (index in frameSet.frames.indices) {
+                    output.write(frameSet.frames[index])
+                    // Keep the decoded-frame counter at the total while the
+                    // cache file is being written. The percentage still moves
+                    // with actual frame writes, but the counter does not
+                    // misleadingly jump back to zero for the save phase.
+                    progress.report(
+                        90 + ((index + 1) * 9 / count),
+                        count,
+                        count
+                    )
+                }
                 output.flush()
             }
             if (target.exists() && !target.delete()) {
@@ -266,6 +324,7 @@ object MediaAsciiStore {
             val index = slot.ordinal
             cachedRevision[index] = revision
             cachedFrames[index] = frameSet
+            progress.report(100, count, count, force = true)
             ImportResult.Animated(revision)
         } catch (t: Throwable) {
             Log.w(TAG, "Cannot write media cache", t)
@@ -281,7 +340,11 @@ object MediaAsciiStore {
         MediaSlot.HOME -> "media_frames_home.bin"
     }
 
-    private fun extractGif(context: Context, uri: Uri): FrameSet? {
+    private fun extractGif(
+        context: Context,
+        uri: Uri,
+        progress: ProgressSink
+    ): FrameSet? {
         val temporary = File(context.cacheDir, "ascii_import_${System.nanoTime()}.gif")
         return try {
             context.contentResolver.openInputStream(uri)?.use { input ->
@@ -295,6 +358,7 @@ object MediaAsciiStore {
             if (durationMs <= 0) return null
 
             val plan = framePlan(durationMs.toLong(), context)
+            progress.report(5, 0, plan.count, force = true)
             val geometry = targetGeometry(
                 context,
                 sourceWidth,
@@ -326,9 +390,16 @@ object MediaAsciiStore {
                 movie.draw(canvas, 0f, 0f)
                 canvas.restore()
                 frames.add(bitmapToGray(bitmap))
+                progress.report(
+                    5 + ((index + 1) * 80 / plan.count),
+                    index + 1,
+                    plan.count
+                )
             }
             bitmap.recycle()
+            progress.report(87, plan.count, plan.count, force = true)
             normalizeFrames(frames)
+            progress.report(89, plan.count, plan.count, force = true)
             FrameSet(width, height, plan.fps, frames.toTypedArray())
         } catch (t: Throwable) {
             Log.w(TAG, "GIF import failed", t)
@@ -338,7 +409,11 @@ object MediaAsciiStore {
         }
     }
 
-    private fun extractVideo(context: Context, uri: Uri): FrameSet? {
+    private fun extractVideo(
+        context: Context,
+        uri: Uri,
+        progress: ProgressSink
+    ): FrameSet? {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(context, uri)
@@ -356,6 +431,7 @@ object MediaAsciiStore {
                 MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLongOrNull() ?: 3000L).coerceAtLeast(250L)
             val plan = framePlan(durationMs, context)
+            progress.report(5, 0, plan.count, force = true)
 
             val displayWidth = if (rotation == 90 || rotation == 270) {
                 sourceHeight
@@ -406,30 +482,36 @@ object MediaAsciiStore {
                     frames.getOrNull(frames.lastIndex)?.let {
                         frames.add(it.copyOf())
                     }
-                    continue
-                }
-
-                val oriented = if (rotation != 0) {
-                    Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
-                        .also { if (it !== raw) raw.recycle() }
                 } else {
-                    raw
+                    val oriented = if (rotation != 0) {
+                        Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+                            .also { if (it !== raw) raw.recycle() }
+                    } else {
+                        raw
+                    }
+                    val scaled = if (oriented.width != width || oriented.height != height) {
+                        Bitmap.createScaledBitmap(oriented, width, height, true)
+                            .also { if (it !== oriented) oriented.recycle() }
+                    } else {
+                        oriented
+                    }
+                    frames.add(bitmapToGray(scaled))
+                    scaled.recycle()
                 }
-                val scaled = if (oriented.width != width || oriented.height != height) {
-                    Bitmap.createScaledBitmap(oriented, width, height, true)
-                        .also { if (it !== oriented) oriented.recycle() }
-                } else {
-                    oriented
-                }
-                frames.add(bitmapToGray(scaled))
-                scaled.recycle()
+                progress.report(
+                    5 + ((index + 1) * 80 / count),
+                    index + 1,
+                    count
+                )
             }
 
             if (frames.isEmpty()) return null
             while (frames.size < count) {
                 frames.add(frames.last().copyOf())
             }
+            progress.report(87, count, count, force = true)
             normalizeFrames(frames)
+            progress.report(89, count, count, force = true)
             FrameSet(width, height, plan.fps, frames.toTypedArray())
         } catch (t: Throwable) {
             Log.w(TAG, "Video import failed", t)

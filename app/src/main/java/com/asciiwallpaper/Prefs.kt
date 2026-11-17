@@ -16,7 +16,6 @@ enum class ShapeStyle(val prefValue: String) {
     SNOW("snow"),
     FASTFETCH("fastfetch"),
     ANDROID_LOGO("android_logo"),
-    ANDROID_3D("android_3d"),
     WAVES("waves"),
     LOCK_HOME("lock_home"),
     PHOTO("photo");
@@ -30,8 +29,13 @@ enum class ShapeStyle(val prefValue: String) {
         get() = this == FUSILLI || this == CUBES
 
     companion object {
-        fun fromValue(value: String?): ShapeStyle =
-            entries.firstOrNull { it.prefValue == value } ?: FUSILLI
+        fun fromValue(value: String?): ShapeStyle = when (value) {
+            // 1.8.0 briefly had a separate 3D robot style. Keep upgrading
+            // users on the static Android ASCII scene instead of falling back
+            // to an unrelated first style.
+            "android_3d" -> ANDROID_LOGO
+            else -> entries.firstOrNull { it.prefValue == value } ?: FUSILLI
+        }
     }
 }
 

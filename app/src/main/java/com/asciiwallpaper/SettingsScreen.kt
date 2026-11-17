@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -72,12 +74,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -268,6 +273,9 @@ fun SettingsScreen(
     }
     var photoBusy by remember { mutableStateOf(false) }
     var photoError by remember { mutableStateOf(false) }
+    var photoProgress by remember {
+        mutableStateOf<MediaAsciiStore.ImportProgress?>(null)
+    }
     var lockMediaRevision by rememberSaveable {
         mutableIntStateOf(initialSettings.lockMediaRevision)
     }
@@ -297,6 +305,12 @@ fun SettingsScreen(
     var homeMediaBusy by remember { mutableStateOf(false) }
     var lockMediaError by remember { mutableStateOf(false) }
     var homeMediaError by remember { mutableStateOf(false) }
+    var lockMediaProgress by remember {
+        mutableStateOf<MediaAsciiStore.ImportProgress?>(null)
+    }
+    var homeMediaProgress by remember {
+        mutableStateOf<MediaAsciiStore.ImportProgress?>(null)
+    }
     var showPhotoFitSheet by rememberSaveable { mutableStateOf(false) }
     var showGlyphColorPicker by rememberSaveable { mutableStateOf(false) }
     var showBackgroundColorPicker by rememberSaveable { mutableStateOf(false) }
@@ -304,6 +318,7 @@ fun SettingsScreen(
     var staticWallpaperBusy by remember { mutableStateOf(false) }
     var staticPickerBusy by remember { mutableStateOf(false) }
     val photoScope = rememberCoroutineScope()
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     val style = remember(styleValue) { ShapeStyle.fromValue(styleValue) }
     val symbolStyle = remember(symbolStyleValue) { SymbolStyle.fromValue(symbolStyleValue) }
@@ -418,10 +433,15 @@ fun SettingsScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         photoBusy = true
         photoError = false
+        photoProgress = MediaAsciiStore.ImportProgress(0, 0, 0)
         photoScope.launch {
             val result = try {
                 withContext(Dispatchers.IO) {
-                    MediaAsciiStore.import(appContext, uri)
+                    MediaAsciiStore.import(appContext, uri) { progress ->
+                        mainHandler.post {
+                            if (photoBusy) photoProgress = progress
+                        }
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -429,6 +449,7 @@ fun SettingsScreen(
                 null
             }
             photoBusy = false
+            photoProgress = null
             if (result == null) {
                 photoError = true
             } else {
@@ -460,10 +481,19 @@ fun SettingsScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         lockMediaBusy = true
         lockMediaError = false
+        lockMediaProgress = MediaAsciiStore.ImportProgress(0, 0, 0)
         photoScope.launch {
             val result = try {
                 withContext(Dispatchers.IO) {
-                    MediaAsciiStore.import(appContext, uri, MediaSlot.LOCK)
+                    MediaAsciiStore.import(
+                        appContext,
+                        uri,
+                        MediaSlot.LOCK
+                    ) { progress ->
+                        mainHandler.post {
+                            if (lockMediaBusy) lockMediaProgress = progress
+                        }
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -471,6 +501,7 @@ fun SettingsScreen(
                 null
             }
             lockMediaBusy = false
+            lockMediaProgress = null
             if (result == null) {
                 lockMediaError = true
             } else {
@@ -500,10 +531,19 @@ fun SettingsScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         homeMediaBusy = true
         homeMediaError = false
+        homeMediaProgress = MediaAsciiStore.ImportProgress(0, 0, 0)
         photoScope.launch {
             val result = try {
                 withContext(Dispatchers.IO) {
-                    MediaAsciiStore.import(appContext, uri, MediaSlot.HOME)
+                    MediaAsciiStore.import(
+                        appContext,
+                        uri,
+                        MediaSlot.HOME
+                    ) { progress ->
+                        mainHandler.post {
+                            if (homeMediaBusy) homeMediaProgress = progress
+                        }
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -511,6 +551,7 @@ fun SettingsScreen(
                 null
             }
             homeMediaBusy = false
+            homeMediaProgress = null
             if (result == null) {
                 homeMediaError = true
             } else {
@@ -636,7 +677,8 @@ fun SettingsScreen(
                     settings = currentSettings,
                     columns = shownColumns,
                     photoReady = photoReady,
-                    photoBusy = photoBusy
+                    photoBusy = photoBusy,
+                    photoProgress = photoProgress
                 )
 
                 SettingsCard {
@@ -724,13 +766,6 @@ fun SettingsScreen(
                         tag = "ANDROID",
                         selected = style == ShapeStyle.ANDROID_LOGO,
                         onClick = { selectStyle(ShapeStyle.ANDROID_LOGO) }
-                    )
-                    StyleOption(
-                        title = stringResource(R.string.style_android_3d),
-                        detail = stringResource(R.string.style_android_3d_detail),
-                        tag = "ANDROID 3D",
-                        selected = style == ShapeStyle.ANDROID_3D,
-                        onClick = { selectStyle(ShapeStyle.ANDROID_3D) }
                     )
                     StyleOption(
                         title = stringResource(R.string.style_waves),
@@ -937,6 +972,7 @@ fun SettingsScreen(
                     PhotoPickerCard(
                         ready = photoReady,
                         busy = photoBusy,
+                        progress = photoProgress,
                         error = photoError,
                         fit = photoFit,
                         onPick = {
@@ -955,6 +991,8 @@ fun SettingsScreen(
                         homeReady = homeMediaReady,
                         lockBusy = lockMediaBusy,
                         homeBusy = homeMediaBusy,
+                        lockProgress = lockMediaProgress,
+                        homeProgress = homeMediaProgress,
                         lockError = lockMediaError,
                         homeError = homeMediaError,
                         fit = photoFit,
@@ -1456,7 +1494,7 @@ fun SettingsScreen(
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "ASCII LIVE WALLPAPER  /  v1.8.0",
+                    text = "ASCII LIVE WALLPAPER  /  v1.8.1",
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted.copy(alpha = 0.55f),
@@ -1575,7 +1613,8 @@ private fun AsciiPreviewCard(
     settings: WallpaperSettings,
     columns: Int,
     photoReady: Boolean,
-    photoBusy: Boolean
+    photoBusy: Boolean,
+    photoProgress: MediaAsciiStore.ImportProgress?
 ) {
     val shape = RoundedCornerShape(18.dp)
     val previewDescription = stringResource(R.string.preview_content_description)
@@ -1620,17 +1659,31 @@ private fun AsciiPreviewCard(
                         .border(1.dp, PanelBorder, RoundedCornerShape(8.dp))
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
-                    Text(
-                        text = stringResource(
-                            if (photoBusy) {
-                                R.string.photo_preview_busy
-                            } else {
-                                R.string.photo_preview_missing
-                            }
-                        ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AccentGreen
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = stringResource(
+                                if (photoBusy) {
+                                    R.string.photo_preview_busy
+                                } else {
+                                    R.string.photo_preview_missing
+                                }
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AccentGreen
+                        )
+                        val progress = photoProgress
+                        if (photoBusy && progress != null && progress.totalFrames > 0) {
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = stringResource(
+                                    R.string.photo_progress_percent,
+                                    progress.percent
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextMuted
+                            )
+                        }
+                    }
                 }
             }
             Row(
@@ -1675,6 +1728,8 @@ private fun LockHomePickerCard(
     homeReady: Boolean,
     lockBusy: Boolean,
     homeBusy: Boolean,
+    lockProgress: MediaAsciiStore.ImportProgress?,
+    homeProgress: MediaAsciiStore.ImportProgress?,
     lockError: Boolean,
     homeError: Boolean,
     fit: PhotoFit,
@@ -1710,6 +1765,7 @@ private fun LockHomePickerCard(
                 icon = "◐",
                 ready = lockReady,
                 busy = lockBusy,
+                progress = lockProgress,
                 error = lockError,
                 onClick = onPickLock
             )
@@ -1719,6 +1775,7 @@ private fun LockHomePickerCard(
                 icon = "▣",
                 ready = homeReady,
                 busy = homeBusy,
+                progress = homeProgress,
                 error = homeError,
                 onClick = onPickHome
             )
@@ -1803,10 +1860,14 @@ private fun LockHomeSlotCard(
     icon: String,
     ready: Boolean,
     busy: Boolean,
+    progress: MediaAsciiStore.ImportProgress?,
     error: Boolean,
     onClick: () -> Unit
 ) {
     val shape = RoundedCornerShape(14.dp)
+    val visibleProgress = progress?.takeIf {
+        busy && it.totalFrames > 0
+    }
     Column(
         modifier = modifier
             .clip(shape)
@@ -1842,10 +1903,29 @@ private fun LockHomeSlotCard(
             style = MaterialTheme.typography.bodySmall,
             color = when {
                 error -> MaterialTheme.colorScheme.error
-                ready -> AccentGreen
+                ready || busy -> AccentGreen
                 else -> TextMuted
             }
         )
+        if (visibleProgress != null) {
+            // The gauge and frame counter are fed by the decoder; they show
+            // actual sampled frames, not a timer.
+            ImportProgressBar(
+                progress = visibleProgress,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+            Text(
+                text = stringResource(
+                    R.string.photo_progress_compact,
+                    visibleProgress.percent,
+                    visibleProgress.completedFrames,
+                    visibleProgress.totalFrames
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextMuted,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Button(
             onClick = onClick,
@@ -1874,15 +1954,63 @@ private fun LockHomeSlotCard(
 }
 
 @Composable
+private fun ImportProgressBar(
+    progress: MediaAsciiStore.ImportProgress,
+    modifier: Modifier = Modifier
+) {
+    val fraction = progress.percent.coerceIn(0, 100) / 100f
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(16.dp)
+            .semantics {
+                progressBarRangeInfo = ProgressBarRangeInfo(fraction, 0f..1f)
+            }
+    ) {
+        val stroke = 4.dp.toPx()
+        val radius = stroke / 2f
+        val centerY = size.height / 2f
+        val startX = radius
+        val endX = (size.width - radius).coerceAtLeast(startX)
+        drawLine(
+            color = PanelBorder,
+            start = Offset(startX, centerY),
+            end = Offset(endX, centerY),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        val filledEnd = startX + (endX - startX) * fraction
+        if (fraction > 0f) {
+            drawLine(
+                color = AccentGreenStrong,
+                start = Offset(startX, centerY),
+                end = Offset(filledEnd, centerY),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+        }
+        drawCircle(
+            color = AccentGreen,
+            radius = 4.dp.toPx(),
+            center = Offset(filledEnd, centerY)
+        )
+    }
+}
+
+@Composable
 private fun PhotoPickerCard(
     ready: Boolean,
     busy: Boolean,
+    progress: MediaAsciiStore.ImportProgress?,
     error: Boolean,
     fit: PhotoFit,
     onPick: () -> Unit,
     onConfigureFit: () -> Unit
 ) {
     val fitShape = RoundedCornerShape(12.dp)
+    val visibleProgress = progress?.takeIf {
+        busy && it.totalFrames > 0
+    }
     SettingsCard {
         SectionLabel(stringResource(R.string.section_photo))
         Spacer(Modifier.height(10.dp))
@@ -1908,6 +2036,23 @@ private fun PhotoPickerCard(
                 else -> TextMuted
             }
         )
+        if (visibleProgress != null) {
+            ImportProgressBar(
+                progress = visibleProgress,
+                modifier = Modifier.padding(top = 10.dp)
+            )
+            Text(
+                text = stringResource(
+                    R.string.photo_progress_frames,
+                    visibleProgress.percent,
+                    visibleProgress.completedFrames,
+                    visibleProgress.totalFrames
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextMuted,
+                modifier = Modifier.padding(top = 5.dp)
+            )
+        }
         if (ready) {
             Spacer(Modifier.height(12.dp))
             Row(
@@ -2081,7 +2226,6 @@ private fun previewStyleBadge(style: ShapeStyle): String = when (style) {
     ShapeStyle.SNOW -> "SNOW / FALL"
     ShapeStyle.FASTFETCH -> "FASTFETCH"
     ShapeStyle.ANDROID_LOGO -> "ANDROID ASCII"
-    ShapeStyle.ANDROID_3D -> "ANDROID 3D"
     ShapeStyle.WAVES -> "WAVES / AUDIO"
     ShapeStyle.LOCK_HOME -> "LOCK / HOME"
     ShapeStyle.PHOTO -> "MEDIA"
